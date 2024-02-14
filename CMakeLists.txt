@@ -66,6 +66,7 @@ if(FLUID_BUILD_REFERENCE)
     cuda/src/benchmark.cpp
     cuda/src/cpu_solver.cpp
     cuda/src/experiment_manifest.cpp
+    cuda/src/field_analysis.cpp
     cuda/src/native_runtime.cpp
     cuda/src/numeric_validation.cpp
     cuda/src/performance_model.cpp
@@ -168,6 +169,13 @@ if(BUILD_TESTING AND FLUID_BUILD_TESTS)
     target_link_libraries(fluid_benchmark_contract PRIVATE fluid_reference)
     target_compile_features(fluid_benchmark_contract PRIVATE cxx_std_17)
     add_test(NAME native_benchmark_contract COMMAND fluid_benchmark_contract)
+
+    add_executable(fluid_field_analysis_contract
+      tests/native/field_analysis_contract.cpp
+    )
+    target_link_libraries(fluid_field_analysis_contract PRIVATE fluid_reference)
+    target_compile_features(fluid_field_analysis_contract PRIVATE cxx_std_17)
+    add_test(NAME native_field_analysis_contract COMMAND fluid_field_analysis_contract)
   endif()
 endif()
 
