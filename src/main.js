@@ -33,7 +33,7 @@ import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRunt
 import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
 import { createDiagnosticsReport } from "./runtime/diagnostics.js";
 import { createAdaptiveQualityGovernor } from "./runtime/adaptive-quality.js";
-import { createInputRecorder, serializeInputRecording, validateInputRecording } from "./runtime/input-recorder.js";
+import { createInputRecorder, parseInputRecording, serializeInputRecording, validateInputRecording } from "./runtime/input-recorder.js";
 import { clearSettings, loadSettings, saveSettings } from "./runtime/settings-store.js";
 import { SCENE_PRESETS } from "./config/presets.js";
 import { createPerformanceHud } from "./ui/performance-hud.js";
@@ -105,6 +105,8 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     const recordButton = document.getElementById("recordButton");
     const replayButton = document.getElementById("replayButton");
     const saveMacroButton = document.getElementById("saveMacroButton");
+    const loadMacroButton = document.getElementById("loadMacroButton");
+    const macroFileInput = document.getElementById("macroFileInput");
     const forgetSettingsButton = document.getElementById("forgetSettingsButton");
 
     // Uniform layout: each vec4 occupies one 16-byte slot.
@@ -248,6 +250,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       recordButton.disabled = disabled;
       replayButton.disabled = disabled || !app.replay.recording;
       saveMacroButton.disabled = disabled || !app.replay.recording;
+      loadMacroButton.disabled = disabled;
       diagnosticsButton.disabled = disabled;
       qualityProfileInput.disabled = disabled;
       renderModeInput.disabled = disabled;
@@ -1560,6 +1563,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       }
       replayButton.disabled = !app.available || !app.replay.recording || app.inputRecorder.isRecording();
       saveMacroButton.disabled = !app.available || !app.replay.recording || app.inputRecorder.isRecording();
+      loadMacroButton.disabled = !app.available || app.inputRecorder.isRecording();
     }
 
     function toggleRecording() {
@@ -1713,6 +1717,34 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
       setStatus("Stroke macro saved locally.", "good");
+    }
+
+    function loadStrokeMacro() {
+      if (!app.available) {
+        return;
+      }
+      macroFileInput.value = "";
+      macroFileInput.click();
+    }
+
+    async function handleMacroFileSelection(event) {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+      try {
+        const recording = parseInputRecording(await file.text());
+        if (!recording) {
+          throw new Error("The file is not a supported stroke macro.");
+        }
+        app.replay.active = false;
+        app.replay.recording = recording;
+        resetPointerState();
+        setStatus(`Loaded ${recording.samples.length.toLocaleString()} stroke samples.`, "good");
+        updateRecordingStatus();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Could not load the stroke macro.", "warning");
+      }
     }
 
     function saveDiagnostics() {
@@ -1889,6 +1921,8 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       recordButton.addEventListener("click", toggleRecording);
       replayButton.addEventListener("click", replayRecording);
       saveMacroButton.addEventListener("click", saveStrokeMacro);
+      loadMacroButton.addEventListener("click", loadStrokeMacro);
+      macroFileInput.addEventListener("change", handleMacroFileSelection);
       diagnosticsButton.addEventListener("click", saveDiagnostics);
       forgetSettingsButton.addEventListener("click", () => {
         clearSettings(getSettingsStorage());
