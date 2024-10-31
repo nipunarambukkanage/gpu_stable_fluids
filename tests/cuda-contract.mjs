@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 
 const requiredFiles = [
   "CMakeLists.txt",
@@ -76,6 +76,7 @@ const benchmark = read("cuda/src/benchmark.cpp");
 const cli = read("cuda/src/main.cpp");
 const cmakePresets = read("CMakePresets.json");
 const benchmarkContract = read("tests/native/benchmark_contract.cpp");
+const nativeModules = readdirSync("cuda/src/modules").filter((filePath) => filePath.endsWith(".cpp"));
 
 assert(cmake.includes("project(gpu_stable_fluids_native LANGUAGES CXX CUDA)"), "CMake must enable native C++ and CUDA languages");
 assert(cmake.includes("find_package(CUDAToolkit REQUIRED)"), "CMake must link the CUDA toolkit explicitly");
@@ -109,6 +110,9 @@ assert(sphHeader.includes("class SphSolver"), "SPH mode must expose a CPU orches
 assert(cli.includes("writePpm"), "CPU visualization coordination must export device-generated frames");
 assert(cmake.includes("FLUID_BUILD_REFERENCE"), "CMake must expose the deterministic C++ reference runtime option");
 assert(cmake.includes("add_library(fluid_reference STATIC"), "CMake must build the C++ reference runtime library");
+assert(cmake.includes("FLUID_NATIVE_EXTENSION_SOURCES"), "CMake must include the focused native extension module set");
+assert(nativeModules.length >= 100, "native extension module set must contain at least 100 C++ translation units");
+assert(existsSync("tests/native/native_module_contract.cpp"), "native module contract must be present");
 assert(cmake.includes("add_executable(fluid_reference_demo"), "CMake must expose a native C++ reference executable");
 assert(cpuHeader.includes("class CpuStableFluidSolver"), "reference solver must expose a C++ host implementation");
 assert(cpuSolver.includes("sample") && cpuSolver.includes("solvePressure") && cpuSolver.includes("projectVelocity"), "reference solver must implement advection, pressure, and projection stages");
@@ -119,6 +123,7 @@ assert(runtimeHeader.includes("class NativeReferenceRuntime") && runtimeHeader.i
 assert(runtime.includes("NativeReferenceRuntime::applyCommands") && runtime.includes("NativeReferenceRuntime::writeReport"), "native runtime must implement command processing and structured reports");
 assert(runtime.includes("singleStepRequested_") && runtime.includes("writeTelemetryArtifacts"), "native runtime must provide deterministic stepping and telemetry artifacts");
 assert(runtime.includes("validateRgbaFrame") && runtime.includes("validateSimulationDiagnostics"), "native runtime must validate frames and numerical diagnostics");
+assert(runtime.includes("measureRgbaFrame") && runtime.includes("shouldExportFrame"), "native runtime must publish frame metrics and use centralized export policy");
 assert(cmake.includes("cuda/src/gpu_diagnostics.cpp"), "CUDA library must compile the native GPU diagnostics component");
 assert(gpuDiagnostics.includes("cudaMemGetInfo") && gpuDiagnostics.includes("cudaDeviceGetAttribute"), "GPU diagnostics must query runtime memory and device attributes");
 assert(gpuDiagnostics.includes("evaluateLaunch") && gpuDiagnostics.includes("theoreticalOccupancy"), "GPU diagnostics must expose launch legality and occupancy estimates");

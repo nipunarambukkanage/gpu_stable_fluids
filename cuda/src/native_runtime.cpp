@@ -1,5 +1,6 @@
 #include "gpu_fluids/native_runtime.hpp"
 
+#include "gpu_fluids/runtime_ops.hpp"
 #include "gpu_fluids/visualization.hpp"
 
 #include <algorithm>
@@ -157,6 +158,7 @@ void NativeReferenceRuntime::simulateFrame() {
     auto renderStage = collector_.stage(StageId::Render);
     solver_.downloadFrame(frameBuffer_);
   }
+  const FrameMetrics frameMetrics = measureRgbaFrame(frameBuffer_, solver_.width(), solver_.height());
   const ValidationReport frameValidation = validateRgbaFrame(frameBuffer_, solver_.width(), solver_.height());
   const ValidationReport diagnosticValidation = validateSimulationDiagnostics(
       solver_.maxSpeed(), solver_.dyeEnergy(), static_cast<std::size_t>(solver_.width()) * solver_.height());
@@ -176,6 +178,9 @@ void NativeReferenceRuntime::simulateFrame() {
   report_.framesExported = static_cast<std::uint64_t>(report_.exports.size());
   report_.maximumObservedSpeed = std::max(report_.maximumObservedSpeed, solver_.maxSpeed());
   report_.finalDyeEnergy = solver_.dyeEnergy();
+  report_.finalFrameMeanLuminance = frameMetrics.meanLuminance;
+  report_.finalFrameActivePixels = frameMetrics.activePixels;
+  report_.finalFrameOpaquePixels = frameMetrics.opaquePixels;
   report_.telemetry = journal_.summarize();
 }
 
@@ -184,8 +189,7 @@ void NativeReferenceRuntime::exportFrameIfNeeded() {
     return;
   }
   const std::uint64_t frame = currentFrame_ + 1;
-  if (frame % static_cast<std::uint64_t>(config_.exportEvery) != 0 &&
-      frame != static_cast<std::uint64_t>(config_.frameLimit)) {
+  if (!shouldExportFrame(frame, config_.exportEvery, config_.frameLimit)) {
     return;
   }
 
@@ -271,6 +275,9 @@ void NativeReferenceRuntime::writeReport(const std::filesystem::path& path) cons
          << "  \"pausedByCommand\": " << (report.pausedByCommand ? "true" : "false") << ",\n"
          << "  \"maximumObservedSpeed\": " << report.maximumObservedSpeed << ",\n"
          << "  \"finalDyeEnergy\": " << report.finalDyeEnergy << ",\n"
+         << "  \"finalFrameMeanLuminance\": " << report.finalFrameMeanLuminance << ",\n"
+         << "  \"finalFrameActivePixels\": " << report.finalFrameActivePixels << ",\n"
+         << "  \"finalFrameOpaquePixels\": " << report.finalFrameOpaquePixels << ",\n"
          << "  \"validationChecks\": " << report.validationChecks << ",\n"
          << "  \"validationFailures\": " << report.validationFailures << ",\n"
          << "  \"averageFrameMilliseconds\": " << report.telemetry.averageFrameMilliseconds << ",\n"

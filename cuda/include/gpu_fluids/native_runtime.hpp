@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpu_fluids/cpu_solver.hpp"
+#include "gpu_fluids/frame_metrics.hpp"
 #include "gpu_fluids/input_trajectory.hpp"
 #include "gpu_fluids/numeric_validation.hpp"
 #include "gpu_fluids/telemetry.hpp"
@@ -57,6 +58,9 @@ struct RuntimeReport {
   bool pausedByCommand = false;
   float maximumObservedSpeed = 0.0F;
   float finalDyeEnergy = 0.0F;
+  float finalFrameMeanLuminance = 0.0F;
+  std::size_t finalFrameActivePixels = 0;
+  std::size_t finalFrameOpaquePixels = 0;
   std::uint64_t validationChecks = 0;
   std::uint64_t validationFailures = 0;
   TelemetrySummary telemetry{};

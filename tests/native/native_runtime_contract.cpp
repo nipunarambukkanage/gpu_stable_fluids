@@ -33,7 +33,11 @@ int main() {
     return fail("runtime did not complete its configured frame budget");
   }
   if (!std::isfinite(static_cast<double>(firstReport.finalDyeEnergy)) ||
-      firstReport.maximumObservedSpeed <= 0.0F) {
+      firstReport.maximumObservedSpeed <= 0.0F ||
+      !std::isfinite(static_cast<double>(firstReport.finalFrameMeanLuminance)) ||
+      firstReport.finalFrameMeanLuminance <= 0.0F ||
+      firstReport.finalFrameActivePixels == 0 ||
+      firstReport.finalFrameOpaquePixels != 24U * 20U) {
     return fail("runtime report did not expose finite simulation diagnostics");
   }
 

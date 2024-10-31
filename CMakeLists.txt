@@ -16,6 +16,10 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 find_package(CUDAToolkit REQUIRED)
 
+file(GLOB FLUID_NATIVE_EXTENSION_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/cuda/src/modules/*.cpp"
+)
+
 add_library(fluid_cuda STATIC
   cuda/src/gpu_diagnostics.cpp
   cuda/src/launch_policy.cpp
@@ -75,6 +79,7 @@ if(FLUID_BUILD_REFERENCE)
     cuda/src/telemetry.cpp
     cuda/src/trace_recorder.cpp
     cuda/src/visualization.cpp
+    ${FLUID_NATIVE_EXTENSION_SOURCES}
   )
   target_include_directories(fluid_reference
     PUBLIC
@@ -192,6 +197,13 @@ if(BUILD_TESTING AND FLUID_BUILD_TESTS)
     target_link_libraries(fluid_input_trajectory_contract PRIVATE fluid_reference)
     target_compile_features(fluid_input_trajectory_contract PRIVATE cxx_std_17)
     add_test(NAME native_input_trajectory_contract COMMAND fluid_input_trajectory_contract)
+
+    add_executable(fluid_native_module_contract
+      tests/native/native_module_contract.cpp
+    )
+    target_link_libraries(fluid_native_module_contract PRIVATE fluid_reference)
+    target_compile_features(fluid_native_module_contract PRIVATE cxx_std_17)
+    add_test(NAME native_module_contract COMMAND fluid_native_module_contract)
   endif()
 endif()
 
