@@ -68,6 +68,7 @@ if(FLUID_BUILD_REFERENCE)
     cuda/src/experiment_manifest.cpp
     cuda/src/field_analysis.cpp
     cuda/src/frame_metrics.cpp
+    cuda/src/input_trajectory.cpp
     cuda/src/native_runtime.cpp
     cuda/src/numeric_validation.cpp
     cuda/src/performance_model.cpp
@@ -184,6 +185,13 @@ if(BUILD_TESTING AND FLUID_BUILD_TESTS)
     target_link_libraries(fluid_frame_metrics_contract PRIVATE fluid_reference)
     target_compile_features(fluid_frame_metrics_contract PRIVATE cxx_std_17)
     add_test(NAME native_frame_metrics_contract COMMAND fluid_frame_metrics_contract)
+
+    add_executable(fluid_input_trajectory_contract
+      tests/native/input_trajectory_contract.cpp
+    )
+    target_link_libraries(fluid_input_trajectory_contract PRIVATE fluid_reference)
+    target_compile_features(fluid_input_trajectory_contract PRIVATE cxx_std_17)
+    add_test(NAME native_input_trajectory_contract COMMAND fluid_input_trajectory_contract)
   endif()
 endif()
 

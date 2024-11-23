@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpu_fluids/cpu_solver.hpp"
+#include "gpu_fluids/input_trajectory.hpp"
 #include "gpu_fluids/numeric_validation.hpp"
 #include "gpu_fluids/telemetry.hpp"
 #include "gpu_fluids/trace_recorder.hpp"
@@ -34,6 +35,7 @@ struct RuntimeConfig {
   int exportEvery = 30;
   int pressureIterations = 20;
   float fixedDeltaTime = 1.0F / 60.0F;
+  EllipticalStrokeConfig strokeTrajectory{};
   bool exportFrames = true;
   bool writeTelemetry = true;
   bool quiet = false;
@@ -100,6 +102,7 @@ class NativeReferenceRuntime final {
 
   RuntimeConfig config_{};
   CpuStableFluidSolver solver_;
+  EllipticalStrokeTrajectory trajectory_;
   TelemetryCollector collector_;
   TelemetryJournal journal_;
   TraceRecorder trace_;

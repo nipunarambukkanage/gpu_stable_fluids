@@ -24,8 +24,10 @@ The browser WebGPU page remains a portable preview. The native path is not a wra
     │   ├── config.hpp          # host/device layout, grid, block, and metrics contracts
     │   ├── cuda_utils.hpp      # checked CUDA Runtime API calls
     │   ├── solver.hpp          # persistent solver ownership boundary
+    │   ├── input_trajectory.hpp # deterministic normalized stroke generation
     │   └── visualization.hpp  # CPU frame-export contract
     └── src/
+        ├── input_trajectory.cpp # deterministic normalized stroke-path generator
         ├── solver.cu          # kernels plus CUDA resource lifecycle
         ├── sph_solver.cu      # SPH neighbor grid, forces, integration, and rendering
         ├── main.cpp           # CPU controls and demo workload
@@ -81,6 +83,11 @@ The SPH mode adds a separate persistent resource set:
 | Device and pinned overflow counters | Makes cell-capacity pressure observable without a full particle readback |
 
 Both solver modes keep their simulation state device-resident between steps. The SPH path only transfers its small constant parameter block during stepping, plus the rendered frame and overflow diagnostic when the CPU requests presentation.
+
+The CPU reference uses an `EllipticalStrokeTrajectory` to generate its default
+input. Its coordinates and radii are normalized, so the same configured path
+scales predictably to every grid size while passing an ordinary stroke endpoint
+and velocity through the parameter block.
 
 Reset uses asynchronous memset and one-time particle initialization on the compute stream. No cudaMalloc, cudaFree, or repeated bulk initialization appears in the simulation iteration. The only normal-loop host-to-device transfer is the small 112-byte SimulationParams block copied to CUDA constant memory.
 

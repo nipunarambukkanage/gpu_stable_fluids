@@ -32,7 +32,7 @@ std::string jsonPath(const std::filesystem::path& path) {
 }  // namespace
 
 NativeReferenceRuntime::NativeReferenceRuntime(RuntimeConfig config)
-    : config_(std::move(config)), solver_(config_.width, config_.height) {
+    : config_(std::move(config)), solver_(config_.width, config_.height), trajectory_(config_.strokeTrajectory) {
   validateConfig();
   solver_.setPressureIterations(config_.pressureIterations);
   report_.backend = "cpu-reference";
@@ -198,6 +198,8 @@ void NativeReferenceRuntime::exportFrameIfNeeded() {
 SimulationParams NativeReferenceRuntime::makeParameters(std::uint64_t frame) const {
   const float time = static_cast<float>(frame - 1) * config_.fixedDeltaTime;
   const float nextTime = time + config_.fixedDeltaTime;
+  const StrokeSegment stroke = trajectory_.sample(
+      time, config_.fixedDeltaTime, static_cast<float>(config_.width), static_cast<float>(config_.height));
   SimulationParams params;
   params.time = nextTime;
   params.deltaTime = config_.fixedDeltaTime;
@@ -205,16 +207,12 @@ SimulationParams NativeReferenceRuntime::makeParameters(std::uint64_t frame) con
   params.gridHeight = static_cast<float>(config_.height);
   params.pointerActive = 1.0F;
   params.brushRadius = std::max(3.0F, static_cast<float>(config_.width) * 0.04F);
-  params.strokeStartX = static_cast<float>(config_.width) * 0.5F +
-                        std::cos(time * 1.7F) * static_cast<float>(config_.width) * 0.28F;
-  params.strokeStartY = static_cast<float>(config_.height) * 0.5F +
-                        std::sin(time * 2.1F) * static_cast<float>(config_.height) * 0.22F;
-  params.strokeEndX = static_cast<float>(config_.width) * 0.5F +
-                      std::cos(nextTime * 1.7F) * static_cast<float>(config_.width) * 0.28F;
-  params.strokeEndY = static_cast<float>(config_.height) * 0.5F +
-                      std::sin(nextTime * 2.1F) * static_cast<float>(config_.height) * 0.22F;
-  params.injectedVelocityX = (params.strokeEndX - params.strokeStartX) / params.deltaTime;
-  params.injectedVelocityY = (params.strokeEndY - params.strokeStartY) / params.deltaTime;
+  params.strokeStartX = stroke.startX;
+  params.strokeStartY = stroke.startY;
+  params.strokeEndX = stroke.endX;
+  params.strokeEndY = stroke.endY;
+  params.injectedVelocityX = stroke.velocityX;
+  params.injectedVelocityY = stroke.velocityY;
   params.velocityForce = 0.9F;
   params.inkAmount = 1.7F;
   params.inkColorR = 0.22F + 0.35F * (0.5F + 0.5F * std::sin(time * 0.7F));
