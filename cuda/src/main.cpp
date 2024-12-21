@@ -1,4 +1,5 @@
 #include "gpu_fluids/config.hpp"
+#include "gpu_fluids/frame_metrics.hpp"
 #include "gpu_fluids/gpu_diagnostics.hpp"
 #include "gpu_fluids/launch_policy.hpp"
 #include "gpu_fluids/solver.hpp"
@@ -161,6 +162,19 @@ void writeDeviceReport(const std::filesystem::path& directory,
   }
 }
 
+void printFrameMetrics(const gpu_fluids::FrameMetrics& metrics, bool quiet) {
+  if (quiet) {
+    return;
+  }
+  const double activePercentage = metrics.pixels == 0U
+                                      ? 0.0
+                                      : static_cast<double>(metrics.activePixels) * 100.0 /
+                                            static_cast<double>(metrics.pixels);
+  std::cout << "    frame luminance: " << std::fixed << std::setprecision(4)
+            << metrics.meanLuminance << ", active pixels: " << metrics.activePixels
+            << " (" << activePercentage << "%)\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -189,6 +203,8 @@ int main(int argc, char** argv) {
         solver.step(makeSphParams(frame));
         if ((frame + 1) % options.exportEvery == 0 || frame + 1 == options.frames) {
           solver.downloadFrame(rgba);
+          printFrameMetrics(gpu_fluids::measureRgbaFrame(
+                                rgba, solver.width(), solver.height()), options.quiet);
           std::ostringstream filename;
           filename << "sph-frame-" << std::setw(5) << std::setfill('0') << (frame + 1) << ".ppm";
           gpu_fluids::writePpm(options.outputDirectory / filename.str(), solver.width(), solver.height(), rgba.data());
@@ -227,6 +243,8 @@ int main(int argc, char** argv) {
       solver.step(makeDemoParams(frame, options.enableVorticity));
       if ((frame + 1) % options.exportEvery == 0 || frame + 1 == options.frames) {
         solver.downloadFrame(rgba);
+        printFrameMetrics(gpu_fluids::measureRgbaFrame(
+                              rgba, solver.width(), solver.height()), options.quiet);
         std::ostringstream filename;
         filename << "frame-" << std::setw(5) << std::setfill('0') << (frame + 1) << ".ppm";
         gpu_fluids::writePpm(options.outputDirectory / filename.str(), solver.width(), solver.height(), rgba.data());

@@ -108,6 +108,7 @@ assert(sphSolver.includes("cellParticles"), "SPH mode must retain a device-resid
 assert(sphSolver.includes("cudaMemcpyToSymbolAsync"), "SPH controls must use asynchronous constant-memory upload");
 assert(sphHeader.includes("class SphSolver"), "SPH mode must expose a CPU orchestration boundary");
 assert(cli.includes("writePpm"), "CPU visualization coordination must export device-generated frames");
+assert(cli.includes("measureRgbaFrame") && cli.includes("printFrameMetrics"), "CUDA CLI must report quantitative frame-quality metrics");
 assert(cmake.includes("FLUID_BUILD_REFERENCE"), "CMake must expose the deterministic C++ reference runtime option");
 assert(cmake.includes("add_library(fluid_reference STATIC"), "CMake must build the C++ reference runtime library");
 assert(cmake.includes("FLUID_NATIVE_EXTENSION_SOURCES"), "CMake must include the focused native extension module set");

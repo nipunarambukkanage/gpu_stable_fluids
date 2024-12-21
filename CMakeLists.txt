@@ -21,6 +21,7 @@ file(GLOB FLUID_NATIVE_EXTENSION_SOURCES CONFIGURE_DEPENDS
 )
 
 add_library(fluid_cuda STATIC
+  cuda/src/frame_metrics.cpp
   cuda/src/gpu_diagnostics.cpp
   cuda/src/launch_policy.cpp
   cuda/src/solver.cu
