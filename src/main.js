@@ -13,12 +13,14 @@ import {
   PARTICLE_WORKGROUP_SIZE,
   PARTICLE_WORKGROUPS,
   PARTICLE_BUFFER_SIZE,
+  PARTICLE_DRAW_VERTEX_COUNT,
+  INDIRECT_ARGS_SIZE,
   UNIFORM_FLOAT_COUNT,
   UNIFORM_BUFFER_SIZE,
   createInitialParticleData
 } from "./config/simulation.js";
 import { createGpuTimer, destroyGpuTimer, readGpuTimestamp } from "./gpu/timestamp-profiler.js";
-import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
+import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
 
 "use strict";
 
@@ -51,6 +53,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
     const kernelStatus = document.getElementById("kernelStatus");
     const gpuTimeStatus = document.getElementById("gpuTimeStatus");
     const tracerStatus = document.getElementById("tracerStatus");
+    const drawStatus = document.getElementById("drawStatus");
     const brushRadiusValue = document.getElementById("brushRadiusValue");
     const velocityForceValue = document.getElementById("velocityForceValue");
     const inkAmountValue = document.getElementById("inkAmountValue");
@@ -354,7 +357,13 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
           { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } }
         ]
       });
-      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, particles, render, particleRender };
+      const indirectArgs = device.createBindGroupLayout({
+        label: "GPU indirect draw-args bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "storage" } }
+        ]
+      });
+      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, particles, render, particleRender, indirectArgs };
     }
 
     async function createShaderModule(device, code, label) {
@@ -371,7 +380,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
     }
 
     async function createPipelines(device, layouts) {
-      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vorticityModule, confinementModule, particleComputeModule, vertexModule, fragmentModule, particleVertexModule, particleFragmentModule] = await Promise.all([
+      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vorticityModule, confinementModule, particleComputeModule, vertexModule, fragmentModule, particleVertexModule, particleFragmentModule, indirectArgsModule] = await Promise.all([
         createShaderModule(device, splatShaderCode, "Splat shader"),
         createShaderModule(device, advectionShaderCode, "Advection shader"),
         createShaderModule(device, divergenceShaderCode, "Divergence shader"),
@@ -383,7 +392,8 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         createShaderModule(device, renderVertexShaderCode, "Render vertex shader"),
         createShaderModule(device, renderFragmentShaderCode, "Render fragment shader"),
         createShaderModule(device, particleVertexShaderCode, "GPU tracer vertex shader"),
-        createShaderModule(device, particleFragmentShaderCode, "GPU tracer fragment shader")
+        createShaderModule(device, particleFragmentShaderCode, "GPU tracer fragment shader"),
+        createShaderModule(device, indirectArgsShaderCode, "GPU indirect draw arguments shader")
       ]);
 
       const pipelineLayouts = {
@@ -396,7 +406,8 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         confinement: device.createPipelineLayout({ label: "Vorticity confinement pipeline layout", bindGroupLayouts: [layouts.confinement] }),
         particles: device.createPipelineLayout({ label: "GPU tracer compute pipeline layout", bindGroupLayouts: [layouts.particles] }),
         render: device.createPipelineLayout({ label: "Density render pipeline layout", bindGroupLayouts: [layouts.render] }),
-        particleRender: device.createPipelineLayout({ label: "GPU tracer render pipeline layout", bindGroupLayouts: [layouts.particleRender] })
+        particleRender: device.createPipelineLayout({ label: "GPU tracer render pipeline layout", bindGroupLayouts: [layouts.particleRender] }),
+        indirectArgs: device.createPipelineLayout({ label: "GPU indirect draw arguments pipeline layout", bindGroupLayouts: [layouts.indirectArgs] })
       };
 
       return {
@@ -412,7 +423,8 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
           vertex: vertexModule,
           fragment: fragmentModule,
           particleVertex: particleVertexModule,
-          particleFragment: particleFragmentModule
+          particleFragment: particleFragmentModule,
+          indirectArgs: indirectArgsModule
         },
         pipelineLayouts,
         pipelines: {
@@ -479,6 +491,11 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
               }]
             },
             primitive: { topology: "triangle-list" }
+          }),
+          indirectArgs: device.createComputePipeline({
+            label: "GPU indirect draw arguments pipeline",
+            layout: pipelineLayouts.indirectArgs,
+            compute: { module: indirectArgsModule, entryPoint: "main" }
           })
         }
       };
@@ -510,7 +527,17 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       return buffers;
     }
 
-    function createBindGroups(device, layouts, uniformBuffer, views, sampler, particleBuffers) {
+    function createIndirectArgsBuffer(device) {
+      const buffer = device.createBuffer({
+        label: "GPU-generated tracer indirect draw arguments",
+        size: INDIRECT_ARGS_SIZE,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST
+      });
+      device.queue.writeBuffer(buffer, 0, new Uint32Array([PARTICLE_DRAW_VERTEX_COUNT, PARTICLE_COUNT, 0, 0]));
+      return buffer;
+    }
+
+    function createBindGroups(device, layouts, uniformBuffer, views, sampler, particleBuffers, indirectArgsBuffer) {
       const splat = createSplatOrAdvectionBindGroups(device, layouts.splat, uniformBuffer, views, "Splat");
       const advection = createSplatOrAdvectionBindGroups(device, layouts.advection, uniformBuffer, views, "Advection");
       const divergence = [0, 1].map((readIndex) => device.createBindGroup({
@@ -587,7 +614,12 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
           { binding: 1, resource: { buffer: particleBuffers[particleIndex] } }
         ]
       }));
-      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, particles, render, particleRender };
+      const indirectArgs = device.createBindGroup({
+        label: "GPU indirect draw arguments bind group",
+        layout: layouts.indirectArgs,
+        entries: [{ binding: 0, resource: { buffer: indirectArgsBuffer } }]
+      });
+      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, particles, render, particleRender, indirectArgs };
     }
 
     async function createGpuResources(device) {
@@ -613,15 +645,16 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         vorticity: createSimulationTexture(device, "Vorticity", "r32float")
       };
       const particleBuffers = createParticleBuffers(device);
+      const indirectArgsBuffer = createIndirectArgsBuffer(device);
       const views = createTextureViews(textures);
       const sampler = device.createSampler({ label: "Linear presentation sampler", minFilter: "linear", magFilter: "linear" });
       const layouts = createBindGroupLayouts(device);
       const pipelineBundle = await createPipelines(device, layouts);
-      const bindGroups = createBindGroups(device, layouts, uniformBuffer, views, sampler, particleBuffers);
+      const bindGroups = createBindGroups(device, layouts, uniformBuffer, views, sampler, particleBuffers, indirectArgsBuffer);
       return {
         uniformBuffer,
         textures,
-        buffers: { particles: particleBuffers },
+        buffers: { particles: particleBuffers, indirectArgs: indirectArgsBuffer },
         views,
         sampler,
         layouts,
@@ -662,6 +695,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       for (const buffer of app.resources.buffers.particles) {
         app.device.queue.writeBuffer(buffer, 0, initialParticleData);
       }
+      app.device.queue.writeBuffer(app.resources.buffers.indirectArgs, 0, new Uint32Array([PARTICLE_DRAW_VERTEX_COUNT, PARTICLE_COUNT, 0, 0]));
       app.resources.velocityIndex = 0;
       app.resources.densityIndex = 0;
       app.resources.pressureIndex = 0;
@@ -884,7 +918,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       if (app.particlesEnabled) {
         renderPass.setPipeline(app.resources.pipelines.particleRender);
         renderPass.setBindGroup(0, app.resources.bindGroups.particleRender[app.resources.particleIndex]);
-        renderPass.draw(6, PARTICLE_COUNT, 0, 0);
+        renderPass.drawIndirect(app.resources.buffers.indirectArgs, 0);
       }
       renderPass.end();
     }
@@ -945,6 +979,13 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       resources.velocityIndex = 1 - resources.velocityIndex;
 
       if (app.particlesEnabled) {
+        encodeComputePass(
+          commandEncoder,
+          resources.pipelines.indirectArgs,
+          resources.bindGroups.indirectArgs,
+          "GPU indirect draw-arguments pass",
+          { workgroupsX: 1, workgroupsY: 1, workgroupsZ: 1 }
+        );
         encodeComputePass(
           commandEncoder,
           resources.pipelines.particles,
@@ -1212,6 +1253,10 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
     }
 
     function updateTracerState() {
+      drawStatus.textContent = tracerToggle.checked ? "Indirect" : "Skipped";
+      drawStatus.title = tracerToggle.checked
+        ? "Tracer instance count is generated in a GPU storage buffer and consumed by drawIndirect."
+        : "GPU tracer compute and indirect draw are disabled.";
       app.particlesEnabled = tracerToggle.checked;
       tracerStatus.textContent = app.particlesEnabled ? `${PARTICLE_COUNT.toLocaleString()} active` : "Off";
       tracerStatus.title = app.particlesEnabled

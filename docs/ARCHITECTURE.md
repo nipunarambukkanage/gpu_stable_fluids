@@ -34,6 +34,7 @@ HTML shell + external CSS
 | Divergence | 1 | `r32float` | Centered velocity divergence. |
 | Vorticity | 1 | `r32float` | Optional scalar curl field. |
 | Tracer particles | 2 | 16-byte storage records | GPU-resident positions, ages, and deterministic seeds. |
+| Indirect draw arguments | 1 | 16-byte draw record | GPU-generated vertex/instance counts for tracer rendering. |
 | Uniform buffer | 1 | 112 bytes | Per-frame parameters with seven 16-byte slots. |
 
 All simulation textures use `TEXTURE_BINDING`, `STORAGE_BINDING`, and `COPY_DST`. The fixed simulation grid is 512 × 512; presentation dimensions are independent and may change with CSS size and device pixel ratio.
@@ -51,6 +52,7 @@ Bind groups are built once after texture views and layouts exist. The cached com
 - Tracer compute: four combinations of velocity read index and particle source index, writing the opposite particle buffer.
 - Render: two density read-index variants.
 - Tracer render: two particle read-index variants, using instanced quads.
+- Indirect arguments: one storage bind group for the device-generated four-word draw command.
 
 No simulation texture is sampled and storage-written in the same pass. The JavaScript index fields make the current readable side explicit and are swapped only after encoding the pass that writes the opposite side.
 
@@ -60,6 +62,8 @@ No simulation texture is sampled and storage-written in the same pass. The JavaS
 
 The loop does not map buffers, read textures back to the CPU, wait for GPU completion, or create pipelines/bind groups. Only the per-frame uniform upload and transient encoder/pass descriptors occur in the hot path. On adapters exposing `timestamp-query`, one sampled frame every 30 iterations adds two timestamp writes and an asynchronous readback request; all other frames remain unchanged.
 
+When tracers are enabled, a one-invocation compute pass refreshes the indirect draw record before the tracer workload and render pass. This command data remains device-local and does not require a CPU readback.
+
 ## Tiled stencil execution
 
 Divergence, pressure, and vorticity use CUDA-style workgroup tiling. Each 16 × 16 workgroup stages an 18 × 18 core-plus-halo tile in `var<workgroup>` memory, reaches `workgroupBarrier()`, and then evaluates the neighbor stencil from the tile. This keeps the synchronization local to each workgroup while avoiding repeated global neighbor loads inside those kernels. See [CUDA_TO_WEBGPU.md](CUDA_TO_WEBGPU.md) for the portable API mapping and limitations.
@@ -67,6 +71,8 @@ Divergence, pressure, and vorticity use CUDA-style workgroup tiling. Each 16 × 
 ## GPU-resident tracers
 
 The optional tracer stage is a separate GPU workload rather than a CPU visualization layer. Two storage buffers contain 8,192 records of `{ position, age, seed }`. The compute pass samples the current projected velocity texture, advances all records with bounded explicit integration, respawns escaped particles, and swaps the source/destination buffer index. The render pass then draws six vertices per instance with an additive blend pipeline. No particle position crosses the GPU/CPU boundary during normal operation.
+
+The indirect argument record stores vertex count, instance count, first vertex, and first instance. Keeping this command data GPU-generated leaves a clean extension point for future GPU culling or particle compaction.
 
 ## Optional GPU timing
 

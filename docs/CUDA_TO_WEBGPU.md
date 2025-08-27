@@ -26,6 +26,8 @@ WebGPU is a browser API with portable compute and graphics access. It does not e
 
 The mapping is structural. It does not imply identical compiler behavior, cache policies, occupancy, warp scheduling, or numerical results across APIs.
 
+The tracer draw uses a one-invocation compute writer for a four-word indirect command record, followed by a render pass that consumes the record with drawIndirect. This is the browser-portable equivalent of a GPU-produced work queue or graph-generated launch parameter block.
+
 ## Profiling without a synchronization trap
 
 When the adapter exposes `timestamp-query`, initialization requests the feature and creates a two-entry timestamp query set plus two small 16-byte buffers. A sampled command encoder writes a start timestamp before the first compute pass and an end timestamp after the render pass, resolves the query set, copies it to the map-readable buffer, and submits with the same queue path as every other frame.
@@ -87,7 +89,8 @@ If a native CUDA backend were added outside this browser project, each WGSL comp
 4. Launch a 32 × 32 grid of blocks, preserving the global bounds guard.
 5. Use CUDA events for elapsed-time measurements and a stream for ordered pass submission.
 6. Keep the 20 pressure iterations and explicit swaps, or use CUDA Graph capture after the sequence is stable.
-7. Add cuFFT only for a deliberately different pressure solver; it is not required by this Jacobi method.
+7. Generate device-side draw or dispatch records for future particle compaction or culling, analogous to a CUDA work queue or graph-produced launch parameters.
+8. Add cuFFT only for a deliberately different pressure solver; it is not required by this Jacobi method.
 
 That native backend is deliberately not included here. Adding `.cu` files or a CUDA build toolchain would violate the project’s single-file, zero-cost, browser-runnable constraint and would not make those kernels executable from an ordinary web page.
 

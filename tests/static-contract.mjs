@@ -44,10 +44,13 @@ assert(runtime.includes('"./gpu/shaders.js"'), "main entry must import the GPU s
 assert(config.includes("export const GRID_WIDTH = 512"), "simulation configuration must own the fixed grid size");
 assert(profiler.includes("timestamp-query"), "GPU profiler module must use optional timestamp-query");
 assert(shaders.includes("export const particleComputeShaderCode"), "GPU shader module must own the tracer compute source");
+assert(shaders.includes("export const indirectArgsShaderCode"), "GPU shader module must own the indirect draw-arguments source");
 assert(styles.includes(":root"), "external stylesheet must contain the application design tokens");
-assert((shaders.match(/@compute @workgroup_size\(/g) || []).length === 8, "GPU shader module must contain the eight expected compute entry points");
+assert((shaders.match(/@compute @workgroup_size\(/g) || []).length === 9, "GPU shader module must contain the nine expected compute entry points");
 assert((shaders.match(/workgroupBarrier\(\)/g) || []).length === 3, "tiled stencil kernels must retain three workgroup barriers");
 assert(runtime.includes("PARTICLE_COUNT"), "runtime must retain GPU tracer workload configuration");
+assert(runtime.includes("GPUBufferUsage.INDIRECT"), "tracer draw arguments must use an indirect-capable GPU buffer");
+assert(runtime.includes("drawIndirect"), "tracer rendering must consume GPU-generated indirect arguments");
 assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${profiler}\n${shaders}`), "runtime must remain local and free of forbidden dependencies");
 
 for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/timestamp-profiler.js", "src/gpu/shaders.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
@@ -62,6 +65,6 @@ if (failures.length > 0) {
 } else {
   console.log("static-contract: passed");
   console.log("- modular HTML shell, external CSS, and GPU entry modules found");
-  console.log("- eight WGSL compute entry points and three tiled barriers found in src/gpu/shaders.js");
+  console.log("- nine WGSL compute entry points and three tiled barriers found in src/gpu/shaders.js");
   console.log("- Node syntax validation passed for runtime and tooling modules");
 }

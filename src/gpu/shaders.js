@@ -695,3 +695,19 @@ export const particleFragmentShaderCode = `
         return color;
       }
     `;
+
+export const indirectArgsShaderCode = `
+      @group(0) @binding(0) var<storage, read_write> drawArguments: array<u32>;
+
+      @compute @workgroup_size(1, 1, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        if (globalId.x != 0u) {
+          return;
+        }
+        // GPU-generated DrawIndirectArguments: vertexCount, instanceCount, firstVertex, firstInstance.
+        drawArguments[0] = 6u;
+        drawArguments[1] = ${PARTICLE_COUNT}u;
+        drawArguments[2] = 0u;
+        drawArguments[3] = 0u;
+      }
+    `;

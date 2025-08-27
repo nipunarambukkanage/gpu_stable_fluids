@@ -50,6 +50,8 @@ Also review that the runtime contains no `TODO`, CDN, runtime `fetch()`, analyti
 
 ## Resource and shader review
 
+The tracer smoke test should also show the GPU draw status as Indirect when enabled and Skipped when disabled. The indirect buffer must be storage-writable, indirect-readable, initialized for paused rendering, and refreshed before each enabled tracer draw. The two generic compute bullets below apply to the simulation-grid kernels; the indirect writer is intentionally a one-invocation scalar pass.
+
 - Every compute entry point uses `@compute @workgroup_size(16, 16, 1)`.
 - Every compute entry point guards global invocation IDs against width and height before loads/stores.
 - Divergence, pressure, and vorticity stage an 18 × 18 tile and synchronize with `workgroupBarrier()` before neighbor reads.
