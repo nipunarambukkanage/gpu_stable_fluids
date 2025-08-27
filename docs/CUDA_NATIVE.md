@@ -71,6 +71,17 @@ The solver allocates the complete resource graph once:
 | Device uchar4 frame | GPU-rendered presentation image |
 | Pinned host frame | Asynchronous device-to-host visualization handoff |
 
+The SPH mode adds a separate persistent resource set:
+
+| Allocation | Purpose |
+| --- | --- |
+| Double-buffered position and velocity SoA arrays | Coalesced particle state with one writer per particle |
+| Density, pressure, and force arrays | Neighbor-derived SPH state and force accumulation |
+| Cell counters and bounded particle index table | Uniform-grid spatial partition for nine-cell neighbor traversal |
+| Device and pinned overflow counters | Makes cell-capacity pressure observable without a full particle readback |
+
+Both solver modes keep their simulation state device-resident between steps. The SPH path only transfers its small constant parameter block during stepping, plus the rendered frame and overflow diagnostic when the CPU requests presentation.
+
 Reset uses asynchronous memset and one-time particle initialization on the compute stream. No cudaMalloc, cudaFree, or repeated bulk initialization appears in the simulation iteration. The only normal-loop host-to-device transfer is the small 112-byte SimulationParams block copied to CUDA constant memory.
 
 ## Kernel and memory strategy

@@ -31,7 +31,8 @@ set_target_properties(fluid_cuda PROPERTIES
 )
 
 target_compile_options(fluid_cuda PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr;-lineinfo>
+  $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+  $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
 )
 
 if(FLUID_ENABLE_FAST_MATH)
