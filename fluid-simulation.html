@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07101a">
+  <title>Zero-Cost Real-Time WebGPU Stable Fluids Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #050910;
+      --panel: rgba(10, 18, 29, 0.86);
+      --panel-solid: #0b1420;
+      --panel-border: rgba(158, 201, 232, 0.18);
+      --text: #edf7ff;
+      --muted: #9db3c5;
+      --faint: #71889a;
+      --accent: #64d8ff;
+      --accent-strong: #9aeaff;
+      --warning: #ffd17a;
+      --danger: #ff9b9b;
+      --shadow: rgba(0, 0, 0, 0.42);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--page);
+      color: var(--text);
+    }
+
+    body {
+      min-width: 280px;
+    }
+
+    .app-shell {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      isolation: isolate;
+      background:
+        radial-gradient(circle at 72% 20%, rgba(21, 84, 111, 0.16), transparent 34%),
+        radial-gradient(circle at 16% 88%, rgba(24, 61, 98, 0.12), transparent 30%),
+        var(--page);
+    }
+
+    .stage {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+    }
+
+    #fluidCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      cursor: crosshair;
+      outline: none;
+      background: #02050a;
+    }
+
+    #fluidCanvas:focus-visible {
+      box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
+    .compatibility-card {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: min(32rem, calc(100% - 2rem));
+      transform: translate(-50%, -50%);
+      padding: 1.35rem 1.5rem;
+      border: 1px solid rgba(255, 209, 122, 0.4);
+      border-radius: 1rem;
+      background: rgba(12, 18, 25, 0.94);
+      box-shadow: 0 1rem 4rem var(--shadow);
+      z-index: 4;
+    }
+
+    .compatibility-card[hidden] {
+      display: none;
+    }
+
+    .compatibility-card h1 {
+      margin: 0 0 0.55rem;
+      font-size: 1.15rem;
+      line-height: 1.25;
+    }
+
+    .compatibility-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    .controls {
+      position: absolute;
+      top: clamp(0.75rem, 2.4vw, 1.5rem);
+      left: clamp(0.75rem, 2.4vw, 1.5rem);
+      width: min(22rem, calc(100vw - 1.5rem));
+      max-height: calc(100vh - 1.5rem);
+      overflow: auto;
+      padding: 1rem;
+      border: 1px solid var(--panel-border);
+      border-radius: 1rem;
+      background: var(--panel);
+      box-shadow: 0 1rem 3.5rem var(--shadow);
+      backdrop-filter: blur(18px);
+      z-index: 3;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(158, 201, 232, 0.35) transparent;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .controls.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-1rem);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.3rem;
+      color: var(--accent);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .panel-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.95rem;
+    }
+
+    .panel-heading h1 {
+      margin: 0;
+      font-size: clamp(1rem, 2vw, 1.2rem);
+      line-height: 1.25;
+    }
+
+    .panel-heading p {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.45;
+    }
+
+    .hide-button {
+      flex: 0 0 auto;
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      border-radius: 0.55rem;
+      font-size: 1.1rem;
+      line-height: 1;
+    }
+
+    .status-card {
+      display: grid;
+      gap: 0.6rem;
+      margin-bottom: 0.95rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(158, 201, 232, 0.12);
+      border-radius: 0.75rem;
+      background: rgba(2, 8, 14, 0.5);
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      font-size: 0.76rem;
+    }
+
+    .status-line span:first-child {
+      color: var(--muted);
+    }
+
+    .status-value {
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .status-value[data-tone="good"] {
+      color: var(--accent-strong);
+    }
+
+    .status-value[data-tone="warning"] {
+      color: var(--warning);
+    }
+
+    .status-value[data-tone="danger"] {
+      color: var(--danger);
+    }
+
+    .status-message {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.45;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 0.72rem;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+
+    .control-group + .control-group {
+      margin-top: 0.9rem;
+    }
+
+    .control-group legend {
+      width: 100%;
+      margin-bottom: 0.05rem;
+      color: var(--faint);
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .field {
+      display: grid;
+      gap: 0.38rem;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    output {
+      color: var(--accent-strong);
+      font-variant-numeric: tabular-nums;
+    }
+
+    input[type="color"] {
+      width: 100%;
+      height: 2.15rem;
+      padding: 0.2rem;
+      border: 1px solid var(--panel-border);
+      border-radius: 0.55rem;
+      background: #08111b;
+      cursor: pointer;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      margin: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    input:disabled,
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    button {
+      min-height: 2.2rem;
+      padding: 0.45rem 0.7rem;
+      border: 1px solid rgba(158, 201, 232, 0.2);
+      border-radius: 0.58rem;
+      background: rgba(18, 35, 51, 0.82);
+      color: var(--text);
+      font: inherit;
+      font-size: 0.76rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: rgba(154, 234, 255, 0.65);
+      background: rgba(26, 57, 76, 0.9);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--accent-strong);
+      outline-offset: 2px;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.55rem;
+    }
+
+    .primary-button {
+      border-color: rgba(100, 216, 255, 0.45);
+      background: rgba(19, 81, 105, 0.78);
+    }
+
+    .retry-button {
+      width: 100%;
+      margin-top: 0.55rem;
+      border-color: rgba(255, 209, 122, 0.42);
+      color: var(--warning);
+    }
+
+    .retry-button[hidden] {
+      display: none;
+    }
+
+    .guide {
+      margin: 0.95rem 0 0;
+      padding-top: 0.85rem;
+      border-top: 1px solid rgba(158, 201, 232, 0.12);
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.5;
+    }
+
+    .guide strong {
+      color: var(--text);
+    }
+
+    .panel-toggle {
+      position: absolute;
+      top: clamp(0.75rem, 2.4vw, 1.5rem);
+      left: clamp(0.75rem, 2.4vw, 1.5rem);
+      z-index: 2;
+      display: none;
+    }
+
+    @media (max-width: 600px) {
+      .controls {
+        top: auto;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        left: 0.75rem;
+        width: auto;
+        max-height: min(72vh, 38rem);
+      }
+
+      .controls.is-hidden {
+        transform: translateY(1rem);
+      }
+
+      .panel-toggle {
+        top: auto;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        left: auto;
+        display: block;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .controls,
+      button {
+        transition: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <section class="stage" aria-label="Interactive WebGPU fluid simulation">
+      <canvas id="fluidCanvas" tabindex="0" aria-label="Fluid simulation canvas. Drag to inject ink and velocity."></canvas>
+      <aside id="compatibilityCard" class="compatibility-card" hidden aria-live="assertive">
+        <h1>WebGPU is not ready</h1>
+        <p id="compatibilityMessage">This simulation needs a current Chromium-based browser with WebGPU enabled. WebGPU generally requires HTTPS or localhost.</p>
+      </aside>
+    </section>
+
+    <button id="panelToggle" class="panel-toggle" type="button" aria-controls="controls" aria-expanded="true">Controls</button>
+
+    <aside id="controls" class="controls" aria-label="Simulation controls">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">GPU fluid lab</p>
+          <h1>Stable Fluids / 512²</h1>
+          <p>Paint motion into an incompressible field.</p>
+        </div>
+        <button id="hideControlsButton" class="hide-button" type="button" aria-label="Hide controls" title="Hide controls">×</button>
+      </div>
+
+      <section class="status-card" aria-label="Simulation status">
+        <div class="status-line"><span>WebGPU</span><span id="gpuStatus" class="status-value" data-tone="warning">Starting…</span></div>
+        <div class="status-line"><span>Resolution</span><span id="resolutionStatus" class="status-value">512 × 512</span></div>
+        <div class="status-line"><span>Frame rate</span><span id="fpsStatus" class="status-value">— FPS</span></div>
+        <div class="status-line"><span>Pressure</span><span id="pressureStatus" class="status-value">20 iterations</span></div>
+        <p id="statusMessage" class="status-message" role="status" aria-live="polite">Requesting a high-performance local GPU…</p>
+        <button id="retryGpuButton" class="retry-button" type="button" hidden>Retry GPU</button>
+      </section>
+
+      <fieldset class="control-group">
+        <legend>Ink</legend>
+        <div class="field">
+          <label class="field-label" for="inkColor"><span>Ink color</span><output id="inkColorValue">#48B7FF</output></label>
+          <input id="inkColor" type="color" value="#48b7ff" aria-describedby="inkColorValue">
+        </div>
+        <div class="field">
+          <label class="field-label" for="brushRadius"><span>Brush radius</span><output id="brushRadiusValue">18 texels</output></label>
+          <input id="brushRadius" type="range" min="4" max="64" step="1" value="18" aria-describedby="brushRadiusValue">
+        </div>
+        <div class="field">
+          <label class="field-label" for="inkAmount"><span>Ink injection</span><output id="inkAmountValue">1.80</output></label>
+          <input id="inkAmount" type="range" min="0.1" max="4" step="0.05" value="1.8" aria-describedby="inkAmountValue">
+        </div>
+      </fieldset>
+
+      <fieldset class="control-group">
+        <legend>Motion</legend>
+        <div class="field">
+          <label class="field-label" for="velocityForce"><span>Velocity force</span><output id="velocityForceValue">1.00×</output></label>
+          <input id="velocityForce" type="range" min="0.1" max="2.4" step="0.05" value="1" aria-describedby="velocityForceValue">
+        </div>
+        <div class="field">
+          <label class="field-label" for="velocityDissipation"><span>Velocity dissipation</span><output id="velocityDissipationValue">0.08</output></label>
+          <input id="velocityDissipation" type="range" min="0" max="1" step="0.01" value="0.08" aria-describedby="velocityDissipationValue">
+        </div>
+        <div class="field">
+          <label class="field-label" for="inkDissipation"><span>Ink dissipation</span><output id="inkDissipationValue">0.025</output></label>
+          <input id="inkDissipation" type="range" min="0" max="1" step="0.005" value="0.025" aria-describedby="inkDissipationValue">
+        </div>
+      </fieldset>
+
+      <div class="button-row">
+        <button id="pauseButton" class="primary-button" type="button" disabled>Pause</button>
+        <button id="clearButton" type="button" disabled>Clear</button>
+      </div>
+      <p class="guide"><strong>Drag</strong> on the canvas to paint. Direction creates flow; slow strokes make calm trails. Space pauses, C clears, and H hides controls.</p>
+    </aside>
+  </main>
+
+  <script>
+    "use strict";
+
+    // 3. JavaScript constants and application state
+    const GRID_WIDTH = 512;
+    const GRID_HEIGHT = 512;
+    const WORKGROUP_SIZE = 16;
+    const WORKGROUPS_X = Math.ceil(GRID_WIDTH / WORKGROUP_SIZE);
+    const WORKGROUPS_Y = Math.ceil(GRID_HEIGHT / WORKGROUP_SIZE);
+    const PRESSURE_ITERATIONS = 20;
+    const MAX_FRAME_DELTA = 1 / 30;
+    const MAX_POINTER_VELOCITY = 1800;
+    const MAX_DENSITY = 12;
+    const MAX_EFFECTIVE_DPR = 2;
+    const UNIFORM_FLOAT_COUNT = 24;
+    const UNIFORM_BUFFER_SIZE = UNIFORM_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+    const canvas = document.getElementById("fluidCanvas");
+    const controls = document.getElementById("controls");
+    const panelToggle = document.getElementById("panelToggle");
+    const hideControlsButton = document.getElementById("hideControlsButton");
+    const compatibilityCard = document.getElementById("compatibilityCard");
+    const compatibilityMessage = document.getElementById("compatibilityMessage");
+    const gpuStatus = document.getElementById("gpuStatus");
+    const resolutionStatus = document.getElementById("resolutionStatus");
+    const fpsStatus = document.getElementById("fpsStatus");
+    const pressureStatus = document.getElementById("pressureStatus");
+    const statusMessage = document.getElementById("statusMessage");
+    const retryGpuButton = document.getElementById("retryGpuButton");
+    const pauseButton = document.getElementById("pauseButton");
+    const clearButton = document.getElementById("clearButton");
+    const inkColorInput = document.getElementById("inkColor");
+    const brushRadiusInput = document.getElementById("brushRadius");
+    const velocityForceInput = document.getElementById("velocityForce");
+    const inkAmountInput = document.getElementById("inkAmount");
+    const velocityDissipationInput = document.getElementById("velocityDissipation");
+    const inkDissipationInput = document.getElementById("inkDissipation");
+    const inkColorValue = document.getElementById("inkColorValue");
+    const brushRadiusValue = document.getElementById("brushRadiusValue");
+    const velocityForceValue = document.getElementById("velocityForceValue");
+    const inkAmountValue = document.getElementById("inkAmountValue");
+    const velocityDissipationValue = document.getElementById("velocityDissipationValue");
+    const inkDissipationValue = document.getElementById("inkDissipationValue");
+
+    // Uniform layout: each vec4 occupies one 16-byte slot.
+    // 0..3: time, delta time, velocity dissipation, ink dissipation.
+    // 4..7: grid width, grid height, pointer-active flag, brush radius in texels.
+    // 8..11: stroke start x/y, reserved, reserved.
+    // 12..15: stroke end x/y, reserved, reserved.
+    // 16..19: injected velocity x/y, velocity-force multiplier, ink amount.
+    // 20..23: ink color RGB, render exposure.
+    const uniformData = new Float32Array(UNIFORM_FLOAT_COUNT);
+    const zeroTextureData = {
+      velocity: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
+      density: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
+      scalar: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 4)
+    };
+
+    const app = {
+      adapter: null,
+      device: null,
+      context: null,
+      canvasFormat: null,
+      resources: null,
+      available: false,
+      initializing: false,
+      paused: prefersReducedMotion,
+      pageHidden: document.visibilityState === "hidden",
+      animationFrameId: 0,
+      animationRunning: false,
+      lastFrameTime: null,
+      simulationTime: 0,
+      fpsAccumulator: 0,
+      fpsFrames: 0,
+      resizeObserver: null,
+      presentationWidth: 0,
+      presentationHeight: 0,
+      pointer: {
+        active: false,
+        pointerId: null,
+        hasPosition: false,
+        segmentStartX: GRID_WIDTH * 0.5,
+        segmentStartY: GRID_HEIGHT * 0.5,
+        currentX: GRID_WIDTH * 0.5,
+        currentY: GRID_HEIGHT * 0.5,
+        velocityX: 0,
+        velocityY: 0,
+        lastSampleTime: 0
+      }
+    };
+
+    // 4. WGSL compute shaders
+    const splatShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var velocitySource: texture_2d<f32>;
+      @group(0) @binding(2) var densitySource: texture_2d<f32>;
+      @group(0) @binding(3) var velocityDestination: texture_storage_2d<rg32float, write>;
+      @group(0) @binding(4) var densityDestination: texture_storage_2d<rgba16float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadVelocity(coordinate: vec2<i32>) -> vec2<f32> {
+        return textureLoad(velocitySource, clampCoordinate(coordinate), 0).xy;
+      }
+
+      fn loadDensity(coordinate: vec2<i32>) -> vec4<f32> {
+        return textureLoad(densitySource, clampCoordinate(coordinate), 0);
+      }
+
+      fn distanceToSegment(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> f32 {
+        let segment = end - start;
+        let segmentLengthSquared = dot(segment, segment);
+        if (segmentLengthSquared <= 0.000001) {
+          return distance(point, start);
+        }
+        let projection = clamp(dot(point - start, segment) / segmentLengthSquared, 0.0, 1.0);
+        return distance(point, start + projection * segment);
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        var velocity = loadVelocity(coordinate);
+        var density = loadDensity(coordinate);
+
+        if (params.gridPointer.z > 0.5) {
+          let point = vec2<f32>(coordinate) + vec2<f32>(0.5);
+          let strokeStart = params.strokeStart.xy;
+          let strokeEnd = params.strokeEnd.xy;
+          let radius = max(params.gridPointer.w, 1.0);
+          let distanceToStroke = distanceToSegment(point, strokeStart, strokeEnd);
+          let radialFalloff = exp(-(distanceToStroke * distanceToStroke) / (2.0 * radius * radius));
+          let injectedVelocity = params.injectedVelocityForce.xy * params.injectedVelocityForce.z * radialFalloff;
+          let injectedInk = params.inkColorExposure.xyz * params.injectedVelocityForce.w * radialFalloff;
+          velocity += injectedVelocity;
+          density.rgb = clamp(density.rgb + injectedInk, vec3<f32>(0.0), vec3<f32>(12.0));
+          density.a = clamp(density.a + params.injectedVelocityForce.w * radialFalloff, 0.0, 12.0);
+        }
+
+        velocity = clamp(velocity, vec2<f32>(-4096.0), vec2<f32>(4096.0));
+        textureStore(velocityDestination, coordinate, vec4<f32>(velocity, 0.0, 0.0));
+        textureStore(densityDestination, coordinate, density);
+      }
+    `;
+
+    const advectionShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var velocitySource: texture_2d<f32>;
+      @group(0) @binding(2) var densitySource: texture_2d<f32>;
+      @group(0) @binding(3) var velocityDestination: texture_storage_2d<rg32float, write>;
+      @group(0) @binding(4) var densityDestination: texture_storage_2d<rgba16float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadVelocity(coordinate: vec2<i32>) -> vec2<f32> {
+        return textureLoad(velocitySource, clampCoordinate(coordinate), 0).xy;
+      }
+
+      fn loadDensity(coordinate: vec2<i32>) -> vec4<f32> {
+        return textureLoad(densitySource, clampCoordinate(coordinate), 0);
+      }
+
+      fn sampleVelocity(position: vec2<f32>) -> vec2<f32> {
+        let maximumPosition = vec2<f32>(params.gridPointer.xy) - vec2<f32>(0.5);
+        let safePosition = clamp(position, vec2<f32>(0.5), maximumPosition);
+        let lower = floor(safePosition - vec2<f32>(0.5));
+        let fraction = safePosition - (lower + vec2<f32>(0.5));
+        let lowerCoordinate = clamp(vec2<i32>(lower), vec2<i32>(0), gridSize() - vec2<i32>(1));
+        let upperCoordinate = clamp(lowerCoordinate + vec2<i32>(1), vec2<i32>(0), gridSize() - vec2<i32>(1));
+        let lowerLeft = loadVelocity(lowerCoordinate);
+        let lowerRight = loadVelocity(vec2<i32>(upperCoordinate.x, lowerCoordinate.y));
+        let upperLeft = loadVelocity(vec2<i32>(lowerCoordinate.x, upperCoordinate.y));
+        let upperRight = loadVelocity(upperCoordinate);
+        let horizontalLower = mix(lowerLeft, lowerRight, fraction.x);
+        let horizontalUpper = mix(upperLeft, upperRight, fraction.x);
+        return mix(horizontalLower, horizontalUpper, fraction.y);
+      }
+
+      fn sampleDensity(position: vec2<f32>) -> vec4<f32> {
+        let maximumPosition = vec2<f32>(params.gridPointer.xy) - vec2<f32>(0.5);
+        let safePosition = clamp(position, vec2<f32>(0.5), maximumPosition);
+        let lower = floor(safePosition - vec2<f32>(0.5));
+        let fraction = safePosition - (lower + vec2<f32>(0.5));
+        let lowerCoordinate = clamp(vec2<i32>(lower), vec2<i32>(0), gridSize() - vec2<i32>(1));
+        let upperCoordinate = clamp(lowerCoordinate + vec2<i32>(1), vec2<i32>(0), gridSize() - vec2<i32>(1));
+        let lowerLeft = loadDensity(lowerCoordinate);
+        let lowerRight = loadDensity(vec2<i32>(upperCoordinate.x, lowerCoordinate.y));
+        let upperLeft = loadDensity(vec2<i32>(lowerCoordinate.x, upperCoordinate.y));
+        let upperRight = loadDensity(upperCoordinate);
+        let horizontalLower = mix(lowerLeft, lowerRight, fraction.x);
+        let horizontalUpper = mix(upperLeft, upperRight, fraction.x);
+        return mix(horizontalLower, horizontalUpper, fraction.y);
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        let point = vec2<f32>(coordinate) + vec2<f32>(0.5);
+        let currentVelocity = loadVelocity(coordinate);
+        let backTracedPosition = point - params.timeDtDissipation.y * currentVelocity;
+        let advectedVelocity = sampleVelocity(backTracedPosition);
+        let advectedDensity = sampleDensity(backTracedPosition);
+        let velocityDecay = exp(-params.timeDtDissipation.z * params.timeDtDissipation.y);
+        let densityDecay = exp(-params.timeDtDissipation.w * params.timeDtDissipation.y);
+
+        textureStore(velocityDestination, coordinate, vec4<f32>(clamp(advectedVelocity * velocityDecay, vec2<f32>(-4096.0), vec2<f32>(4096.0)), 0.0, 0.0));
+        textureStore(densityDestination, coordinate, clamp(advectedDensity * densityDecay, vec4<f32>(0.0), vec4<f32>(12.0)));
+      }
+    `;
+
+    const divergenceShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var velocitySource: texture_2d<f32>;
+      @group(0) @binding(2) var divergenceDestination: texture_storage_2d<r32float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadWallVelocity(coordinate: vec2<i32>) -> vec2<f32> {
+        var velocity = textureLoad(velocitySource, clampCoordinate(coordinate), 0).xy;
+        if (coordinate.x < 0 || coordinate.x >= gridSize().x) {
+          velocity.x = -velocity.x;
+        }
+        if (coordinate.y < 0 || coordinate.y >= gridSize().y) {
+          velocity.y = -velocity.y;
+        }
+        return velocity;
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        let left = loadWallVelocity(coordinate + vec2<i32>(-1, 0));
+        let right = loadWallVelocity(coordinate + vec2<i32>(1, 0));
+        let top = loadWallVelocity(coordinate + vec2<i32>(0, -1));
+        let bottom = loadWallVelocity(coordinate + vec2<i32>(0, 1));
+        let divergence = 0.5 * (right.x - left.x + bottom.y - top.y);
+        textureStore(divergenceDestination, coordinate, vec4<f32>(divergence, 0.0, 0.0, 0.0));
+      }
+    `;
+
+    const pressureShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var pressureSource: texture_2d<f32>;
+      @group(0) @binding(2) var divergenceSource: texture_2d<f32>;
+      @group(0) @binding(3) var pressureDestination: texture_storage_2d<r32float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadPressure(coordinate: vec2<i32>) -> f32 {
+        return textureLoad(pressureSource, clampCoordinate(coordinate), 0).x;
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        let center = loadPressure(coordinate);
+        let left = loadPressure(coordinate + vec2<i32>(-1, 0));
+        let right = loadPressure(coordinate + vec2<i32>(1, 0));
+        let top = loadPressure(coordinate + vec2<i32>(0, -1));
+        let bottom = loadPressure(coordinate + vec2<i32>(0, 1));
+        let divergence = textureLoad(divergenceSource, clampCoordinate(coordinate), 0).x;
+        let pressure = (left + right + top + bottom - divergence) * 0.25;
+        textureStore(pressureDestination, coordinate, vec4<f32>(clamp(pressure, -4096.0, 4096.0), 0.0, 0.0, 0.0));
+        _ = center;
+      }
+    `;
+
+    const gradientShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var pressureSource: texture_2d<f32>;
+      @group(0) @binding(2) var velocitySource: texture_2d<f32>;
+      @group(0) @binding(3) var velocityDestination: texture_storage_2d<rg32float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadPressure(coordinate: vec2<i32>) -> f32 {
+        return textureLoad(pressureSource, clampCoordinate(coordinate), 0).x;
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        let pressureLeft = loadPressure(coordinate + vec2<i32>(-1, 0));
+        let pressureRight = loadPressure(coordinate + vec2<i32>(1, 0));
+        let pressureTop = loadPressure(coordinate + vec2<i32>(0, -1));
+        let pressureBottom = loadPressure(coordinate + vec2<i32>(0, 1));
+        var velocity = textureLoad(velocitySource, coordinate, 0).xy;
+        let gradient = 0.5 * vec2<f32>(pressureRight - pressureLeft, pressureBottom - pressureTop);
+        velocity -= gradient;
+
+        if (coordinate.x == 0 || coordinate.x == size.x - 1) {
+          velocity.x = 0.0;
+        }
+        if (coordinate.y == 0 || coordinate.y == size.y - 1) {
+          velocity.y = 0.0;
+        }
+
+        textureStore(velocityDestination, coordinate, vec4<f32>(clamp(velocity, vec2<f32>(-4096.0), vec2<f32>(4096.0)), 0.0, 0.0));
+      }
+    `;
+
+    // 5. WGSL rendering shaders
+    const renderVertexShaderCode = `
+      struct VertexOutput {
+        @builtin(position) position: vec4<f32>,
+        @location(0) uv: vec2<f32>,
+      };
+
+      @vertex
+      fn main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+        var positions = array<vec2<f32>, 6>(
+          vec2<f32>(-1.0, -1.0),
+          vec2<f32>(1.0, -1.0),
+          vec2<f32>(-1.0, 1.0),
+          vec2<f32>(-1.0, 1.0),
+          vec2<f32>(1.0, -1.0),
+          vec2<f32>(1.0, 1.0)
+        );
+        let position = positions[vertexIndex];
+        var output: VertexOutput;
+        output.position = vec4<f32>(position, 0.0, 1.0);
+        output.uv = vec2<f32>((position.x + 1.0) * 0.5, (1.0 - position.y) * 0.5);
+        return output;
+      }
+    `;
+
+    const renderFragmentShaderCode = `
+      @group(0) @binding(0) var densityTexture: texture_2d<f32>;
+      @group(0) @binding(1) var linearSampler: sampler;
+
+      @fragment
+      fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+        let density = max(textureSample(densityTexture, linearSampler, uv).rgb, vec3<f32>(0.0));
+        let exposure = 1.35;
+        let mapped = 1.0 - exp(-density * exposure);
+        let gammaCorrected = pow(mapped, vec3<f32>(1.0 / 2.2));
+        return vec4<f32>(gammaCorrected, 1.0);
+      }
+    `;
+
+    // Later sections append WebGPU initialization, interaction, and the loop.
+  </script>
+</body>
+</html>
