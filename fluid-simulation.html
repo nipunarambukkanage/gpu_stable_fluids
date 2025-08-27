@@ -295,6 +295,19 @@
       cursor: pointer;
     }
 
+    select {
+      width: 100%;
+      min-height: 2.15rem;
+      padding: 0.35rem 0.55rem;
+      border: 1px solid var(--panel-border);
+      border-radius: 0.55rem;
+      background: #08111b;
+      color: var(--text);
+      font: inherit;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
     input:disabled,
     button:disabled {
       cursor: not-allowed;
@@ -334,6 +347,13 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 0.55rem;
+    }
+
+    .tool-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.55rem;
+      margin-top: 0.55rem;
     }
 
     .primary-button {
@@ -432,6 +452,8 @@
         <div class="status-line"><span>Resolution</span><span id="resolutionStatus" class="status-value">512 × 512</span></div>
         <div class="status-line"><span>Frame rate</span><span id="fpsStatus" class="status-value">— FPS</span></div>
         <div class="status-line"><span>Pressure</span><span id="pressureStatus" class="status-value">20 iterations</span></div>
+        <div class="status-line"><span>Simulation time</span><span id="simulationTimeStatus" class="status-value">0.0 s</span></div>
+        <div class="status-line"><span>Vortex force</span><span id="vorticityStatus" class="status-value">Off</span></div>
         <p id="statusMessage" class="status-message" role="status" aria-live="polite">Requesting a high-performance local GPU…</p>
         <button id="retryGpuButton" class="retry-button" type="button" hidden>Retry GPU</button>
       </section>
@@ -474,9 +496,30 @@
         </div>
       </fieldset>
 
+      <fieldset class="control-group">
+        <legend>Lab tools</legend>
+        <div class="field">
+          <label class="field-label" for="scenePreset"><span>Scene preset</span><output id="scenePresetValue">Studio</output></label>
+          <select id="scenePreset" aria-describedby="scenePresetValue">
+            <option value="studio">Studio</option>
+            <option value="soft">Soft ink</option>
+            <option value="long-trails">Long trails</option>
+            <option value="turbulent">Turbulent ribbon</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="vorticityForce"><span>Vortex confinement</span><output id="vorticityForceValue">Off</output></label>
+          <input id="vorticityForce" type="range" min="0" max="1.5" step="0.05" value="0" aria-describedby="vorticityForceValue">
+        </div>
+      </fieldset>
+
       <div class="button-row">
         <button id="pauseButton" class="primary-button" type="button" disabled>Pause</button>
         <button id="clearButton" type="button" disabled>Clear</button>
+      </div>
+      <div class="tool-row">
+        <button id="demoButton" type="button" disabled>Auto demo</button>
+        <button id="snapshotButton" type="button" disabled>Save PNG</button>
       </div>
       <p class="guide"><strong>Drag</strong> on the canvas to paint. Direction creates flow; slow strokes make calm trails. Space pauses, C clears, and H hides controls.</p>
     </aside>
@@ -496,7 +539,7 @@
     const MAX_POINTER_VELOCITY = 1800;
     const MAX_DENSITY = 12;
     const MAX_EFFECTIVE_DPR = 2;
-    const UNIFORM_FLOAT_COUNT = 24;
+    const UNIFORM_FLOAT_COUNT = 28;
     const UNIFORM_BUFFER_SIZE = UNIFORM_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
     const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -527,6 +570,14 @@
     const inkAmountValue = document.getElementById("inkAmountValue");
     const velocityDissipationValue = document.getElementById("velocityDissipationValue");
     const inkDissipationValue = document.getElementById("inkDissipationValue");
+    const simulationTimeStatus = document.getElementById("simulationTimeStatus");
+    const vorticityStatus = document.getElementById("vorticityStatus");
+    const scenePresetInput = document.getElementById("scenePreset");
+    const scenePresetValue = document.getElementById("scenePresetValue");
+    const vorticityForceInput = document.getElementById("vorticityForce");
+    const vorticityForceValue = document.getElementById("vorticityForceValue");
+    const demoButton = document.getElementById("demoButton");
+    const snapshotButton = document.getElementById("snapshotButton");
 
     // Uniform layout: each vec4 occupies one 16-byte slot.
     // 0..3: time, delta time, velocity dissipation, ink dissipation.
@@ -535,6 +586,7 @@
     // 12..15: stroke end x/y, reserved, reserved.
     // 16..19: injected velocity x/y, velocity-force multiplier, ink amount.
     // 20..23: ink color RGB, render exposure.
+    // 24..27: optional vorticity confinement strength, remaining diagnostic slots.
     const uniformData = new Float32Array(UNIFORM_FLOAT_COUNT);
     const simulationSettings = {
       brushRadius: 18,
@@ -542,6 +594,7 @@
       inkAmount: 1.8,
       velocityDissipation: 0.08,
       inkDissipation: 0.025,
+      vorticityConfinement: 0,
       exposure: 0.72
     };
     const zeroTextureData = {
@@ -566,6 +619,7 @@
       simulationTime: 0,
       fpsAccumulator: 0,
       fpsFrames: 0,
+      interfaceAccumulator: 0,
       resizeObserver: null,
       presentationWidth: 0,
       presentationHeight: 0,
@@ -581,6 +635,9 @@
         velocityY: 0,
         hasPendingMotion: false,
         lastSampleTime: 0
+      },
+      demo: {
+        active: false
       }
     };
 
@@ -593,6 +650,7 @@
         strokeEnd: vec4<f32>,
         injectedVelocityForce: vec4<f32>,
         inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
       };
 
       @group(0) @binding(0) var<uniform> params: SimParams;
@@ -668,6 +726,7 @@
         strokeEnd: vec4<f32>,
         injectedVelocityForce: vec4<f32>,
         inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
       };
 
       @group(0) @binding(0) var<uniform> params: SimParams;
@@ -753,6 +812,7 @@
         strokeEnd: vec4<f32>,
         injectedVelocityForce: vec4<f32>,
         inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
       };
 
       @group(0) @binding(0) var<uniform> params: SimParams;
@@ -803,6 +863,7 @@
         strokeEnd: vec4<f32>,
         injectedVelocityForce: vec4<f32>,
         inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
       };
 
       @group(0) @binding(0) var<uniform> params: SimParams;
@@ -848,6 +909,7 @@
         strokeEnd: vec4<f32>,
         injectedVelocityForce: vec4<f32>,
         inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
       };
 
       @group(0) @binding(0) var<uniform> params: SimParams;
@@ -890,6 +952,117 @@
           velocity = vec2<f32>(velocity.x, 0.0);
         }
 
+        textureStore(velocityDestination, coordinate, vec4<f32>(clamp(velocity, vec2<f32>(-4096.0), vec2<f32>(4096.0)), 0.0, 0.0));
+      }
+    `;
+
+    const vorticityShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var velocitySource: texture_2d<f32>;
+      @group(0) @binding(2) var vorticityDestination: texture_storage_2d<r32float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadWallVelocity(coordinate: vec2<i32>) -> vec2<f32> {
+        var velocity = textureLoad(velocitySource, clampCoordinate(coordinate), 0).xy;
+        if (coordinate.x < 0 || coordinate.x >= gridSize().x) {
+          velocity = vec2<f32>(-velocity.x, velocity.y);
+        }
+        if (coordinate.y < 0 || coordinate.y >= gridSize().y) {
+          velocity = vec2<f32>(velocity.x, -velocity.y);
+        }
+        return velocity;
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        let left = loadWallVelocity(coordinate + vec2<i32>(-1, 0));
+        let right = loadWallVelocity(coordinate + vec2<i32>(1, 0));
+        let top = loadWallVelocity(coordinate + vec2<i32>(0, -1));
+        let bottom = loadWallVelocity(coordinate + vec2<i32>(0, 1));
+        let curl = 0.5 * ((right.y - left.y) - (bottom.x - top.x));
+        textureStore(vorticityDestination, coordinate, vec4<f32>(curl, 0.0, 0.0, 0.0));
+      }
+    `;
+
+    const confinementShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var velocitySource: texture_2d<f32>;
+      @group(0) @binding(2) var vorticitySource: texture_2d<f32>;
+      @group(0) @binding(3) var velocityDestination: texture_storage_2d<rg32float, write>;
+
+      fn gridSize() -> vec2<i32> {
+        return vec2<i32>(i32(params.gridPointer.x), i32(params.gridPointer.y));
+      }
+
+      fn clampCoordinate(coordinate: vec2<i32>) -> vec2<i32> {
+        return clamp(coordinate, vec2<i32>(0), gridSize() - vec2<i32>(1));
+      }
+
+      fn loadVelocity(coordinate: vec2<i32>) -> vec2<f32> {
+        return textureLoad(velocitySource, clampCoordinate(coordinate), 0).xy;
+      }
+
+      fn loadVorticity(coordinate: vec2<i32>) -> f32 {
+        return textureLoad(vorticitySource, clampCoordinate(coordinate), 0).x;
+      }
+
+      @compute @workgroup_size(16, 16, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        let size = gridSize();
+        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
+          return;
+        }
+
+        let coordinate = vec2<i32>(globalId.xy);
+        let leftMagnitude = abs(loadVorticity(coordinate + vec2<i32>(-1, 0)));
+        let rightMagnitude = abs(loadVorticity(coordinate + vec2<i32>(1, 0)));
+        let topMagnitude = abs(loadVorticity(coordinate + vec2<i32>(0, -1)));
+        let bottomMagnitude = abs(loadVorticity(coordinate + vec2<i32>(0, 1)));
+        let magnitudeGradient = vec2<f32>(rightMagnitude - leftMagnitude, bottomMagnitude - topMagnitude);
+        let normal = magnitudeGradient / max(length(magnitudeGradient), 0.0001);
+        let curl = loadVorticity(coordinate);
+        let confinementForce = params.vortexSettings.x * vec2<f32>(normal.y, -normal.x) * curl;
+        var velocity = loadVelocity(coordinate) + confinementForce * params.timeDtDissipation.y;
+
+        if (coordinate.x == 0 || coordinate.x == size.x - 1) {
+          velocity = vec2<f32>(0.0, velocity.y);
+        }
+        if (coordinate.y == 0 || coordinate.y == size.y - 1) {
+          velocity = vec2<f32>(velocity.x, 0.0);
+        }
         textureStore(velocityDestination, coordinate, vec4<f32>(clamp(velocity, vec2<f32>(-4096.0), vec2<f32>(4096.0)), 0.0, 0.0));
       }
     `;
@@ -961,8 +1134,12 @@
       inkAmountInput.disabled = disabled;
       velocityDissipationInput.disabled = disabled;
       inkDissipationInput.disabled = disabled;
+      scenePresetInput.disabled = disabled;
+      vorticityForceInput.disabled = disabled;
       pauseButton.disabled = disabled;
       clearButton.disabled = disabled;
+      demoButton.disabled = disabled;
+      snapshotButton.disabled = disabled;
       canvas.style.cursor = disabled ? "not-allowed" : "crosshair";
       updatePauseButton();
     }
@@ -1009,7 +1186,8 @@
         velocity: textures.velocity.map((texture) => texture.createView({ label: `${texture.label} view` })),
         density: textures.density.map((texture) => texture.createView({ label: `${texture.label} view` })),
         pressure: textures.pressure.map((texture) => texture.createView({ label: `${texture.label} view` })),
-        divergence: textures.divergence.createView({ label: "Divergence view" })
+        divergence: textures.divergence.createView({ label: "Divergence view" }),
+        vorticity: textures.vorticity.createView({ label: "Vorticity view" })
       };
     }
 
@@ -1061,6 +1239,23 @@
           { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rg32float", viewDimension: "2d" } }
         ]
       });
+      const vorticity = device.createBindGroupLayout({
+        label: "Vorticity bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, storageTexture: { access: "write-only", format: "r32float", viewDimension: "2d" } }
+        ]
+      });
+      const confinement = device.createBindGroupLayout({
+        label: "Vorticity confinement bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rg32float", viewDimension: "2d" } }
+        ]
+      });
       const render = device.createBindGroupLayout({
         label: "Render bind group layout",
         entries: [
@@ -1068,7 +1263,7 @@
           { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
         ]
       });
-      return { splat, advection, divergence, pressure, gradient, render };
+      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, render };
     }
 
     async function createShaderModule(device, code, label) {
@@ -1085,12 +1280,14 @@
     }
 
     async function createPipelines(device, layouts) {
-      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vertexModule, fragmentModule] = await Promise.all([
+      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vorticityModule, confinementModule, vertexModule, fragmentModule] = await Promise.all([
         createShaderModule(device, splatShaderCode, "Splat shader"),
         createShaderModule(device, advectionShaderCode, "Advection shader"),
         createShaderModule(device, divergenceShaderCode, "Divergence shader"),
         createShaderModule(device, pressureShaderCode, "Pressure shader"),
         createShaderModule(device, gradientShaderCode, "Gradient shader"),
+        createShaderModule(device, vorticityShaderCode, "Vorticity shader"),
+        createShaderModule(device, confinementShaderCode, "Vorticity confinement shader"),
         createShaderModule(device, renderVertexShaderCode, "Render vertex shader"),
         createShaderModule(device, renderFragmentShaderCode, "Render fragment shader")
       ]);
@@ -1101,6 +1298,8 @@
         divergence: device.createPipelineLayout({ label: "Divergence pipeline layout", bindGroupLayouts: [layouts.divergence] }),
         pressure: device.createPipelineLayout({ label: "Pressure pipeline layout", bindGroupLayouts: [layouts.pressure] }),
         gradient: device.createPipelineLayout({ label: "Pressure gradient pipeline layout", bindGroupLayouts: [layouts.gradient] }),
+        vorticity: device.createPipelineLayout({ label: "Vorticity pipeline layout", bindGroupLayouts: [layouts.vorticity] }),
+        confinement: device.createPipelineLayout({ label: "Vorticity confinement pipeline layout", bindGroupLayouts: [layouts.confinement] }),
         render: device.createPipelineLayout({ label: "Density render pipeline layout", bindGroupLayouts: [layouts.render] })
       };
 
@@ -1111,6 +1310,8 @@
           divergence: divergenceModule,
           pressure: pressureModule,
           gradient: gradientModule,
+          vorticity: vorticityModule,
+          confinement: confinementModule,
           vertex: vertexModule,
           fragment: fragmentModule
         },
@@ -1140,6 +1341,16 @@
             label: "Pressure gradient pipeline",
             layout: pipelineLayouts.gradient,
             compute: { module: gradientModule, entryPoint: "main" }
+          }),
+          vorticity: device.createComputePipeline({
+            label: "Vorticity pipeline",
+            layout: pipelineLayouts.vorticity,
+            compute: { module: vorticityModule, entryPoint: "main" }
+          }),
+          confinement: device.createComputePipeline({
+            label: "Vorticity confinement pipeline",
+            layout: pipelineLayouts.confinement,
+            compute: { module: confinementModule, entryPoint: "main" }
           }),
           render: device.createRenderPipeline({
             label: "Density render pipeline",
@@ -1198,6 +1409,25 @@
           { binding: 3, resource: views.velocity[1 - velocityIndex] }
         ]
       })));
+      const vorticity = [0, 1].map((velocityIndex) => device.createBindGroup({
+        label: `Vorticity bind group ${velocityIndex}`,
+        layout: layouts.vorticity,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.velocity[velocityIndex] },
+          { binding: 2, resource: views.vorticity }
+        ]
+      }));
+      const confinement = [0, 1].map((velocityIndex) => device.createBindGroup({
+        label: `Vorticity confinement bind group ${velocityIndex}`,
+        layout: layouts.confinement,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.velocity[velocityIndex] },
+          { binding: 2, resource: views.vorticity },
+          { binding: 3, resource: views.velocity[1 - velocityIndex] }
+        ]
+      }));
       const render = [0, 1].map((densityIndex) => device.createBindGroup({
         label: `Render bind group ${densityIndex}`,
         layout: layouts.render,
@@ -1206,7 +1436,7 @@
           { binding: 1, resource: sampler }
         ]
       }));
-      return { splat, advection, divergence, pressure, gradient, render };
+      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, render };
     }
 
     async function createGpuResources(device) {
@@ -1228,7 +1458,8 @@
           createSimulationTexture(device, "Pressure ping-pong A", "r32float"),
           createSimulationTexture(device, "Pressure ping-pong B", "r32float")
         ],
-        divergence: createSimulationTexture(device, "Divergence", "r32float")
+        divergence: createSimulationTexture(device, "Divergence", "r32float"),
+        vorticity: createSimulationTexture(device, "Vorticity", "r32float")
       };
       const views = createTextureViews(textures);
       const sampler = device.createSampler({ label: "Linear presentation sampler", minFilter: "linear", magFilter: "linear" });
@@ -1274,6 +1505,7 @@
         writeZeroTexture(texture, zeroTextureData.scalar, GRID_WIDTH * 4);
       }
       writeZeroTexture(app.resources.textures.divergence, zeroTextureData.scalar, GRID_WIDTH * 4);
+      writeZeroTexture(app.resources.textures.vorticity, zeroTextureData.scalar, GRID_WIDTH * 4);
       app.resources.velocityIndex = 0;
       app.resources.densityIndex = 0;
       app.resources.pressureIndex = 0;
@@ -1282,6 +1514,8 @@
       app.lastFrameTime = null;
       app.fpsAccumulator = 0;
       app.fpsFrames = 0;
+      app.interfaceAccumulator = 0;
+      simulationTimeStatus.textContent = "0.0 s";
     }
 
     function handleUncapturedError(event) {
@@ -1313,6 +1547,9 @@
       app.initializing = true;
       stopAnimationLoop();
       destroyGpuResources();
+      app.demo.active = false;
+      resetPointerState();
+      demoButton.textContent = "Auto demo";
       setGpuControlsDisabled(true);
       retryGpuButton.hidden = true;
       setGpuState("Starting…", "warning");
@@ -1390,6 +1627,7 @@
 
     function updateUniformBuffer(deltaTime) {
       const resources = app.resources;
+      updateDemoPointer(deltaTime);
       const pointer = app.pointer;
       const hasPosition = pointer.hasPosition;
       const startX = hasPosition ? pointer.segmentStartX : GRID_WIDTH * 0.5;
@@ -1423,6 +1661,10 @@
       uniformData[21] = inkColorComponents[1];
       uniformData[22] = inkColorComponents[2];
       uniformData[23] = simulationSettings.exposure;
+      uniformData[24] = simulationSettings.vorticityConfinement;
+      uniformData[25] = 0;
+      uniformData[26] = 0;
+      uniformData[27] = 0;
 
       app.device.queue.writeBuffer(resources.uniformBuffer, 0, uniformData);
 
@@ -1475,6 +1717,13 @@
       encodeComputePass(commandEncoder, resources.pipelines.advection, resources.bindGroups.advection[resources.velocityIndex], "Velocity and density advection pass");
       resources.velocityIndex = 1 - resources.velocityIndex;
       resources.densityIndex = 1 - resources.densityIndex;
+
+      // Optional curl enhancement. At zero strength the base Stable Fluids path remains unchanged.
+      if (simulationSettings.vorticityConfinement > 0.0001) {
+        encodeComputePass(commandEncoder, resources.pipelines.vorticity, resources.bindGroups.vorticity[resources.velocityIndex], "Vorticity pass");
+        encodeComputePass(commandEncoder, resources.pipelines.confinement, resources.bindGroups.confinement[resources.velocityIndex], "Vorticity confinement pass");
+        resources.velocityIndex = 1 - resources.velocityIndex;
+      }
 
       encodeComputePass(commandEncoder, resources.pipelines.divergence, resources.bindGroups.divergence[resources.velocityIndex], "Divergence pass");
 
@@ -1533,6 +1782,11 @@
     function updateFps(deltaTime) {
       app.fpsAccumulator += deltaTime;
       app.fpsFrames += 1;
+      app.interfaceAccumulator += deltaTime;
+      if (app.interfaceAccumulator >= 0.25) {
+        simulationTimeStatus.textContent = `${app.simulationTime.toFixed(1)} s`;
+        app.interfaceAccumulator = 0;
+      }
       if (app.fpsAccumulator >= 0.5) {
         const framesPerSecond = app.fpsFrames / app.fpsAccumulator;
         fpsStatus.textContent = `${Math.round(framesPerSecond)} FPS`;
@@ -1657,7 +1911,15 @@
     }
 
     function handlePointerDown(event) {
-      if (!app.available || app.pointer.active) {
+      if (!app.available) {
+        return;
+      }
+      if (app.demo.active) {
+        app.demo.active = false;
+        resetPointerState();
+        demoButton.textContent = "Auto demo";
+      }
+      if (app.pointer.active) {
         return;
       }
       event.preventDefault();
@@ -1711,6 +1973,7 @@
       simulationSettings.inkAmount = Number.parseFloat(inkAmountInput.value);
       simulationSettings.velocityDissipation = Number.parseFloat(velocityDissipationInput.value);
       simulationSettings.inkDissipation = Number.parseFloat(inkDissipationInput.value);
+      simulationSettings.vorticityConfinement = Number.parseFloat(vorticityForceInput.value);
       refreshInkColorComponents();
       const selectedColor = inkColorInput.value.toLowerCase();
       for (const presetButton of colorPresetButtons) {
@@ -1722,12 +1985,115 @@
       inkAmountValue.textContent = Number.parseFloat(inkAmountInput.value).toFixed(2);
       velocityDissipationValue.textContent = Number.parseFloat(velocityDissipationInput.value).toFixed(2);
       inkDissipationValue.textContent = Number.parseFloat(inkDissipationInput.value).toFixed(3);
+      vorticityForceValue.textContent = simulationSettings.vorticityConfinement > 0 ? `${simulationSettings.vorticityConfinement.toFixed(2)}×` : "Off";
+      vorticityStatus.textContent = simulationSettings.vorticityConfinement > 0 ? `${simulationSettings.vorticityConfinement.toFixed(2)}×` : "Off";
+      scenePresetValue.textContent = scenePresetInput.options[scenePresetInput.selectedIndex].textContent;
     }
 
     function selectInkPreset(event) {
       const presetButton = event.currentTarget;
       inkColorInput.value = presetButton.dataset.color;
       updateControlReadouts();
+    }
+
+    const scenePresets = Object.freeze({
+      studio: { color: "#48b7ff", brushRadius: 18, inkAmount: 1.8, velocityForce: 1, velocityDissipation: 0.08, inkDissipation: 0.025, vorticity: 0 },
+      soft: { color: "#a7ff83", brushRadius: 26, inkAmount: 1.15, velocityForce: 0.65, velocityDissipation: 0.16, inkDissipation: 0.04, vorticity: 0 },
+      "long-trails": { color: "#ffc857", brushRadius: 12, inkAmount: 1.4, velocityForce: 1.35, velocityDissipation: 0.025, inkDissipation: 0.006, vorticity: 0.35 },
+      turbulent: { color: "#ff5fb3", brushRadius: 20, inkAmount: 1.65, velocityForce: 1.45, velocityDissipation: 0.045, inkDissipation: 0.018, vorticity: 0.9 }
+    });
+
+    function applyScenePreset() {
+      const preset = scenePresets[scenePresetInput.value];
+      if (!preset) {
+        return;
+      }
+      inkColorInput.value = preset.color;
+      brushRadiusInput.value = String(preset.brushRadius);
+      inkAmountInput.value = String(preset.inkAmount);
+      velocityForceInput.value = String(preset.velocityForce);
+      velocityDissipationInput.value = String(preset.velocityDissipation);
+      inkDissipationInput.value = String(preset.inkDissipation);
+      vorticityForceInput.value = String(preset.vorticity);
+      updateControlReadouts();
+      if (app.available) {
+        clearSimulation();
+      }
+    }
+
+    function updateDemoPointer(deltaTime) {
+      if (!app.demo.active) {
+        return;
+      }
+      const pointer = app.pointer;
+      const time = app.simulationTime * 0.72;
+      const nextX = GRID_WIDTH * 0.5 + Math.cos(time) * GRID_WIDTH * 0.27;
+      const nextY = GRID_HEIGHT * 0.5 + Math.sin(time * 1.37) * GRID_HEIGHT * 0.23;
+      if (!pointer.hasPosition) {
+        pointer.segmentStartX = nextX;
+        pointer.segmentStartY = nextY;
+        pointer.currentX = nextX;
+        pointer.currentY = nextY;
+        pointer.hasPosition = true;
+        pointer.hasPendingMotion = false;
+        pointer.velocityX = 0;
+        pointer.velocityY = 0;
+        return;
+      }
+      const safeDelta = Math.max(deltaTime, 1 / 240);
+      let velocityX = (nextX - pointer.currentX) / safeDelta;
+      let velocityY = (nextY - pointer.currentY) / safeDelta;
+      const magnitude = Math.hypot(velocityX, velocityY);
+      if (magnitude > MAX_POINTER_VELOCITY) {
+        const scale = MAX_POINTER_VELOCITY / magnitude;
+        velocityX *= scale;
+        velocityY *= scale;
+      }
+      pointer.velocityX = velocityX;
+      pointer.velocityY = velocityY;
+      pointer.currentX = nextX;
+      pointer.currentY = nextY;
+      pointer.hasPendingMotion = true;
+    }
+
+    function toggleDemo() {
+      if (!app.available) {
+        return;
+      }
+      if (app.demo.active) {
+        app.demo.active = false;
+        resetPointerState();
+        demoButton.textContent = "Auto demo";
+        setStatus("Demo stopped. Drag anywhere on the canvas to take over.", "good");
+        return;
+      }
+      resetPointerState();
+      app.demo.active = true;
+      app.pointer.active = true;
+      demoButton.textContent = "Stop demo";
+      setStatus("Auto demo is painting a figure-eight flow. Drag to take over.", "good");
+      if (app.paused) {
+        togglePause();
+      }
+    }
+
+    function saveSnapshot() {
+      if (!app.available) {
+        return;
+      }
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setStatus("The browser could not create a PNG snapshot.", "warning");
+          return;
+        }
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = `stable-fluids-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+        setStatus("PNG snapshot saved locally.", "good");
+      }, "image/png");
     }
 
     function togglePause() {
@@ -1750,6 +2116,11 @@
     function clearSimulation() {
       if (!app.available) {
         return;
+      }
+      if (app.demo.active) {
+        app.demo.active = false;
+        demoButton.textContent = "Auto demo";
+        resetPointerState();
       }
       clearSimulationTextures();
       setStatus("Simulation cleared. Drag to paint a new field.", "good");
@@ -1835,14 +2206,17 @@
 
     function setupInteractionAndUi() {
       updateControlReadouts();
-      for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput]) {
+      for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput, vorticityForceInput]) {
         input.addEventListener("input", updateControlReadouts);
       }
+      scenePresetInput.addEventListener("change", applyScenePreset);
       for (const presetButton of colorPresetButtons) {
         presetButton.addEventListener("click", selectInkPreset);
       }
       pauseButton.addEventListener("click", togglePause);
       clearButton.addEventListener("click", clearSimulation);
+      demoButton.addEventListener("click", toggleDemo);
+      snapshotButton.addEventListener("click", saveSnapshot);
       retryGpuButton.addEventListener("click", initializeGpu);
       hideControlsButton.addEventListener("click", () => setControlsVisible(false));
       panelToggle.addEventListener("click", () => setControlsVisible(true));
