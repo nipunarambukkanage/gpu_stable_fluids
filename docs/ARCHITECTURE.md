@@ -57,6 +57,10 @@ No simulation texture is sampled and storage-written in the same pass. The JavaS
 
 The loop does not map buffers, read textures back to the CPU, wait for GPU completion, or create pipelines/bind groups. Only the per-frame uniform upload and transient encoder/pass descriptors occur in the hot path.
 
+## Tiled stencil execution
+
+Divergence, pressure, and vorticity use CUDA-style workgroup tiling. Each 16 × 16 workgroup stages an 18 × 18 core-plus-halo tile in `var<workgroup>` memory, reaches `workgroupBarrier()`, and then evaluates the neighbor stencil from the tile. This keeps the synchronization local to each workgroup while avoiding repeated global neighbor loads inside those kernels. See [CUDA_TO_WEBGPU.md](CUDA_TO_WEBGPU.md) for the portable API mapping and limitations.
+
 ## Initialization and recovery
 
 Initialization follows this sequence:

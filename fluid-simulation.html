@@ -449,6 +449,8 @@
 
       <section class="status-card" aria-label="Simulation status">
         <div class="status-line"><span>WebGPU</span><span id="gpuStatus" class="status-value" data-tone="warning">Starting…</span></div>
+        <div class="status-line"><span>GPU adapter</span><span id="gpuAdapterStatus" class="status-value">Detecting…</span></div>
+        <div class="status-line"><span>Kernel config</span><span id="kernelStatus" class="status-value">16 × 16 / 256</span></div>
         <div class="status-line"><span>Resolution</span><span id="resolutionStatus" class="status-value">512 × 512</span></div>
         <div class="status-line"><span>Frame rate</span><span id="fpsStatus" class="status-value">— FPS</span></div>
         <div class="status-line"><span>Pressure</span><span id="pressureStatus" class="status-value">20 iterations</span></div>
@@ -531,6 +533,8 @@
     // 3. JavaScript constants and application state
     const GRID_WIDTH = 512;
     const GRID_HEIGHT = 512;
+    // CUDA-like block dimensions translated to portable WebGPU workgroups.
+    // Tiled stencil passes use a 16x16 interior plus a one-texel halo.
     const WORKGROUP_SIZE = 16;
     const WORKGROUPS_X = Math.ceil(GRID_WIDTH / WORKGROUP_SIZE);
     const WORKGROUPS_Y = Math.ceil(GRID_HEIGHT / WORKGROUP_SIZE);
@@ -565,6 +569,8 @@
     const inkDissipationInput = document.getElementById("inkDissipation");
     const inkColorValue = document.getElementById("inkColorValue");
     const colorPresetButtons = Array.from(document.querySelectorAll(".color-swatch"));
+    const gpuAdapterStatus = document.getElementById("gpuAdapterStatus");
+    const kernelStatus = document.getElementById("kernelStatus");
     const brushRadiusValue = document.getElementById("brushRadiusValue");
     const velocityForceValue = document.getElementById("velocityForceValue");
     const inkAmountValue = document.getElementById("inkAmountValue");
@@ -838,20 +844,64 @@
         return velocity;
       }
 
+      // CUDA-style shared-memory tile: 16x16 threads cooperatively stage an 18x18 halo tile.
+      var<workgroup> velocityTile: array<vec2<f32>, 324>;
+
+      fn tileIndex(x: u32, y: u32) -> u32 {
+        return y * 18u + x;
+      }
+
       @compute @workgroup_size(16, 16, 1)
-      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>, @builtin(local_invocation_id) localId: vec3<u32>) {
         let size = gridSize();
-        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
-          return;
+        let inBounds = globalId.x < u32(size.x) && globalId.y < u32(size.y);
+        var centerVelocity = vec2<f32>(0.0);
+        if (inBounds) {
+          centerVelocity = textureLoad(velocitySource, vec2<i32>(globalId.xy), 0).xy;
+        }
+        let tileX = localId.x + 1u;
+        let tileY = localId.y + 1u;
+        velocityTile[tileIndex(tileX, tileY)] = centerVelocity;
+
+        if (inBounds && localId.x == 0u) {
+          if (globalId.x == 0u) {
+            velocityTile[tileIndex(0u, tileY)] = vec2<f32>(-centerVelocity.x, centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(0u, tileY)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(-1, 0), 0).xy;
+          }
+        }
+        if (inBounds && localId.x == 15u) {
+          if (globalId.x == u32(size.x - 1)) {
+            velocityTile[tileIndex(17u, tileY)] = vec2<f32>(-centerVelocity.x, centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(17u, tileY)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(1, 0), 0).xy;
+          }
+        }
+        if (inBounds && localId.y == 0u) {
+          if (globalId.y == 0u) {
+            velocityTile[tileIndex(tileX, 0u)] = vec2<f32>(centerVelocity.x, -centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(tileX, 0u)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(0, -1), 0).xy;
+          }
+        }
+        if (inBounds && localId.y == 15u) {
+          if (globalId.y == u32(size.y - 1)) {
+            velocityTile[tileIndex(tileX, 17u)] = vec2<f32>(centerVelocity.x, -centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(tileX, 17u)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(0, 1), 0).xy;
+          }
         }
 
-        let coordinate = vec2<i32>(globalId.xy);
-        let left = loadWallVelocity(coordinate + vec2<i32>(-1, 0));
-        let right = loadWallVelocity(coordinate + vec2<i32>(1, 0));
-        let top = loadWallVelocity(coordinate + vec2<i32>(0, -1));
-        let bottom = loadWallVelocity(coordinate + vec2<i32>(0, 1));
+        workgroupBarrier();
+        if (!inBounds) {
+          return;
+        }
+        let left = velocityTile[tileIndex(tileX - 1u, tileY)];
+        let right = velocityTile[tileIndex(tileX + 1u, tileY)];
+        let top = velocityTile[tileIndex(tileX, tileY - 1u)];
+        let bottom = velocityTile[tileIndex(tileX, tileY + 1u)];
         let divergence = 0.5 * (right.x - left.x + bottom.y - top.y);
-        textureStore(divergenceDestination, coordinate, vec4<f32>(divergence, 0.0, 0.0, 0.0));
+        textureStore(divergenceDestination, vec2<i32>(globalId.xy), vec4<f32>(divergence, 0.0, 0.0, 0.0));
       }
     `;
 
@@ -883,21 +933,65 @@
         return textureLoad(pressureSource, clampCoordinate(coordinate), 0).x;
       }
 
+      // The Jacobi stencil uses a 16x16 block plus a one-texel halo in workgroup memory.
+      var<workgroup> pressureTile: array<f32, 324>;
+
+      fn tileIndex(x: u32, y: u32) -> u32 {
+        return y * 18u + x;
+      }
+
       @compute @workgroup_size(16, 16, 1)
-      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>, @builtin(local_invocation_id) localId: vec3<u32>) {
         let size = gridSize();
-        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
-          return;
+        let inBounds = globalId.x < u32(size.x) && globalId.y < u32(size.y);
+        var centerPressure = 0.0;
+        if (inBounds) {
+          centerPressure = textureLoad(pressureSource, vec2<i32>(globalId.xy), 0).x;
+        }
+        let tileX = localId.x + 1u;
+        let tileY = localId.y + 1u;
+        pressureTile[tileIndex(tileX, tileY)] = centerPressure;
+
+        if (inBounds && localId.x == 0u) {
+          if (globalId.x == 0u) {
+            pressureTile[tileIndex(0u, tileY)] = centerPressure;
+          } else {
+            pressureTile[tileIndex(0u, tileY)] = textureLoad(pressureSource, vec2<i32>(globalId.xy) + vec2<i32>(-1, 0), 0).x;
+          }
+        }
+        if (inBounds && localId.x == 15u) {
+          if (globalId.x == u32(size.x - 1)) {
+            pressureTile[tileIndex(17u, tileY)] = centerPressure;
+          } else {
+            pressureTile[tileIndex(17u, tileY)] = textureLoad(pressureSource, vec2<i32>(globalId.xy) + vec2<i32>(1, 0), 0).x;
+          }
+        }
+        if (inBounds && localId.y == 0u) {
+          if (globalId.y == 0u) {
+            pressureTile[tileIndex(tileX, 0u)] = centerPressure;
+          } else {
+            pressureTile[tileIndex(tileX, 0u)] = textureLoad(pressureSource, vec2<i32>(globalId.xy) + vec2<i32>(0, -1), 0).x;
+          }
+        }
+        if (inBounds && localId.y == 15u) {
+          if (globalId.y == u32(size.y - 1)) {
+            pressureTile[tileIndex(tileX, 17u)] = centerPressure;
+          } else {
+            pressureTile[tileIndex(tileX, 17u)] = textureLoad(pressureSource, vec2<i32>(globalId.xy) + vec2<i32>(0, 1), 0).x;
+          }
         }
 
-        let coordinate = vec2<i32>(globalId.xy);
-        let left = loadPressure(coordinate + vec2<i32>(-1, 0));
-        let right = loadPressure(coordinate + vec2<i32>(1, 0));
-        let top = loadPressure(coordinate + vec2<i32>(0, -1));
-        let bottom = loadPressure(coordinate + vec2<i32>(0, 1));
-        let divergence = textureLoad(divergenceSource, clampCoordinate(coordinate), 0).x;
+        workgroupBarrier();
+        if (!inBounds) {
+          return;
+        }
+        let left = pressureTile[tileIndex(tileX - 1u, tileY)];
+        let right = pressureTile[tileIndex(tileX + 1u, tileY)];
+        let top = pressureTile[tileIndex(tileX, tileY - 1u)];
+        let bottom = pressureTile[tileIndex(tileX, tileY + 1u)];
+        let divergence = textureLoad(divergenceSource, vec2<i32>(globalId.xy), 0).x;
         let pressure = (left + right + top + bottom - divergence) * 0.25;
-        textureStore(pressureDestination, coordinate, vec4<f32>(clamp(pressure, -4096.0, 4096.0), 0.0, 0.0, 0.0));
+        textureStore(pressureDestination, vec2<i32>(globalId.xy), vec4<f32>(clamp(pressure, -4096.0, 4096.0), 0.0, 0.0, 0.0));
       }
     `;
 
@@ -990,20 +1084,63 @@
         return velocity;
       }
 
+      var<workgroup> velocityTile: array<vec2<f32>, 324>;
+
+      fn tileIndex(x: u32, y: u32) -> u32 {
+        return y * 18u + x;
+      }
+
       @compute @workgroup_size(16, 16, 1)
-      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>, @builtin(local_invocation_id) localId: vec3<u32>) {
         let size = gridSize();
-        if (globalId.x >= u32(size.x) || globalId.y >= u32(size.y)) {
-          return;
+        let inBounds = globalId.x < u32(size.x) && globalId.y < u32(size.y);
+        var centerVelocity = vec2<f32>(0.0);
+        if (inBounds) {
+          centerVelocity = textureLoad(velocitySource, vec2<i32>(globalId.xy), 0).xy;
+        }
+        let tileX = localId.x + 1u;
+        let tileY = localId.y + 1u;
+        velocityTile[tileIndex(tileX, tileY)] = centerVelocity;
+
+        if (inBounds && localId.x == 0u) {
+          if (globalId.x == 0u) {
+            velocityTile[tileIndex(0u, tileY)] = vec2<f32>(-centerVelocity.x, centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(0u, tileY)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(-1, 0), 0).xy;
+          }
+        }
+        if (inBounds && localId.x == 15u) {
+          if (globalId.x == u32(size.x - 1)) {
+            velocityTile[tileIndex(17u, tileY)] = vec2<f32>(-centerVelocity.x, centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(17u, tileY)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(1, 0), 0).xy;
+          }
+        }
+        if (inBounds && localId.y == 0u) {
+          if (globalId.y == 0u) {
+            velocityTile[tileIndex(tileX, 0u)] = vec2<f32>(centerVelocity.x, -centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(tileX, 0u)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(0, -1), 0).xy;
+          }
+        }
+        if (inBounds && localId.y == 15u) {
+          if (globalId.y == u32(size.y - 1)) {
+            velocityTile[tileIndex(tileX, 17u)] = vec2<f32>(centerVelocity.x, -centerVelocity.y);
+          } else {
+            velocityTile[tileIndex(tileX, 17u)] = textureLoad(velocitySource, vec2<i32>(globalId.xy) + vec2<i32>(0, 1), 0).xy;
+          }
         }
 
-        let coordinate = vec2<i32>(globalId.xy);
-        let left = loadWallVelocity(coordinate + vec2<i32>(-1, 0));
-        let right = loadWallVelocity(coordinate + vec2<i32>(1, 0));
-        let top = loadWallVelocity(coordinate + vec2<i32>(0, -1));
-        let bottom = loadWallVelocity(coordinate + vec2<i32>(0, 1));
+        workgroupBarrier();
+        if (!inBounds) {
+          return;
+        }
+        let left = velocityTile[tileIndex(tileX - 1u, tileY)];
+        let right = velocityTile[tileIndex(tileX + 1u, tileY)];
+        let top = velocityTile[tileIndex(tileX, tileY - 1u)];
+        let bottom = velocityTile[tileIndex(tileX, tileY + 1u)];
         let curl = 0.5 * ((right.y - left.y) - (bottom.x - top.x));
-        textureStore(vorticityDestination, coordinate, vec4<f32>(curl, 0.0, 0.0, 0.0));
+        textureStore(vorticityDestination, vec2<i32>(globalId.xy), vec4<f32>(curl, 0.0, 0.0, 0.0));
       }
     `;
 
@@ -1152,6 +1289,17 @@
 
     function hideCompatibility() {
       compatibilityCard.hidden = true;
+    }
+
+    function updateAdapterTelemetry(adapter) {
+      const adapterInfo = adapter.info || {};
+      const adapterLabel = adapterInfo.description || adapterInfo.device || [adapterInfo.vendor, adapterInfo.architecture].filter(Boolean).join(" · ") || "Local WebGPU adapter";
+      const maximumInvocations = adapter.limits?.maxComputeInvocationsPerWorkgroup || 256;
+      const maximumDispatches = adapter.limits?.maxComputeWorkgroupsPerDimension || 65535;
+      gpuAdapterStatus.textContent = adapterLabel;
+      gpuAdapterStatus.title = adapterLabel;
+      kernelStatus.textContent = `${WORKGROUP_SIZE} × ${WORKGROUP_SIZE} / ${maximumInvocations}`;
+      kernelStatus.title = `Dispatch limit: ${maximumDispatches.toLocaleString()} workgroups per dimension`;
     }
 
     function destroyGpuResources() {
@@ -1577,9 +1725,20 @@
         app.device = device;
         app.context = context;
         app.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+        updateAdapterTelemetry(adapter);
         device.onuncapturederror = handleUncapturedError;
         device.lost.then((info) => handleDeviceLost(device, info)).catch((error) => console.error("Device-loss handler failed:", error));
-        app.resources = await createGpuResources(device);
+        device.pushErrorScope("validation");
+        let initializedResources;
+        try {
+          initializedResources = await createGpuResources(device);
+        } finally {
+          const initializationValidationError = await device.popErrorScope();
+          if (initializationValidationError) {
+            throw new Error(`WebGPU validation failed during initialization: ${initializationValidationError.message}`);
+          }
+        }
+        app.resources = initializedResources;
         configurePresentationCanvas();
         clearSimulationTextures();
         app.available = true;

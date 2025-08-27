@@ -25,6 +25,7 @@ gpu_stable_fluids/
 ├── README.md                   # Project overview, usage, design decisions, and maintenance notes
 └── docs/
     ├── ARCHITECTURE.md         # Runtime components, resource graph, lifecycle, and invariants
+    ├── CUDA_TO_WEBGPU.md       # CUDA concept mapping, tiled kernels, and portability boundaries
     ├── NUMERICAL_METHOD.md     # Stable Fluids equations, coordinate conventions, and GPU passes
     └── VALIDATION.md            # Static checks, browser smoke tests, and regression checklist
 ```
@@ -111,6 +112,14 @@ uniform upload
 ```
 
 Each Jacobi iteration is a separate compute pass inside the same command encoder so WebGPU usage scopes do not alias a sampled pressure texture with its storage destination. There is no GPU readback or `queue.onSubmittedWorkDone()` in the normal loop.
+
+### CUDA-inspired GPU techniques (browser-safe)
+
+The solver now uses a CUDA-like tiled stencil design while remaining a zero-install browser application. Divergence, pressure, and vorticity kernels cooperatively stage an 18 × 18 tile in `var<workgroup>` memory: 16 × 16 invocations cover the interior and the surrounding one-texel halo supplies neighbor values. A `workgroupBarrier()` then makes the tile visible before the stencil is evaluated. This reduces repeated global texture reads for the neighbor-heavy passes and mirrors the structure of a CUDA `__shared__` tile plus `__syncthreads()`.
+
+The page also reports adapter identity and compute limits, wraps initialization in a WebGPU validation error scope, and handles uncaptured validation errors and device loss. These are WebGPU equivalents of the diagnostics and capability checks expected in a native GPU application.
+
+This is CUDA-inspired, not a CUDA runtime. A normal web page cannot execute `.cu` kernels, call cuBLAS/cuFFT, inspect CUDA occupancy counters, or use NVIDIA-only warp intrinsics. The actual implementation is WGSL/WebGPU so it remains portable across supported browser GPUs. The exact concept mapping and a native CUDA porting sketch are in [docs/CUDA_TO_WEBGPU.md](docs/CUDA_TO_WEBGPU.md).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the resource graph and recovery lifecycle.
 

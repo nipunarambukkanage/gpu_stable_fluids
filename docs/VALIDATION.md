@@ -47,6 +47,8 @@ Also review that the file contains no `TODO`, CDN, package import, runtime `fetc
 
 - Every compute entry point uses `@compute @workgroup_size(16, 16, 1)`.
 - Every compute entry point guards global invocation IDs against width and height before loads/stores.
+- Divergence, pressure, and vorticity stage an 18 × 18 tile and synchronize with `workgroupBarrier()` before neighbor reads.
+- The adapter status reports `adapter.info` and the kernel status reports the workgroup shape plus the device invocation limit.
 - `rg32float` velocity, `rgba16float` density, `r32float` pressure, divergence, and vorticity formats match their bind-group layouts.
 - Storage destinations are never the sampled source in the same pass.
 - The uniform buffer is 112 bytes and each WGSL `vec4<f32>` slot is 16-byte aligned.
