@@ -1,10 +1,15 @@
-# Zero-Cost Real-Time WebGPU Stable Fluids Lab
+# Native CUDA C++ Stable Fluids Lab
 
-An interactive 2D incompressible fluid simulator that runs entirely in the browser on the user’s local GPU. The project implements Jos Stam’s Stable Fluids approach with WebGPU compute shaders and WGSL, with a fixed 512 × 512 simulation grid and a responsive presentation canvas.
+A native CUDA C++ implementation of an interactive 2D incompressible Stable Fluids solver. The CPU owns initialization, device selection, simulation control, and visualization coordination, while CUDA kernels parallelize cell and particle work on the GPU across a fixed 512 × 512 grid. A portable WebGPU preview remains available in the browser.
 
-There is no backend, runtime package dependency, API key, cloud service, analytics, or external asset. The application is delivered as a small industrial-style source tree: an HTML shell, an external stylesheet, browser ES modules, and dependency-free validation/serve tooling. It can be copied, archived, or served from any simple local static server.
+The native path is organized as an industrial CMake project with persistent device allocations, coalesced row-major field access, shared-memory stencil tiles, stream-ordered asynchronous output, CUDA events, pinned host memory, and checked Runtime API calls. The browser path is a zero-dependency portability preview, not a substitute for the CUDA executable.
 
 ## What is included
+
+- Native CUDA C++ solver with CUDA Runtime API lifecycle management and a CPU-owned command-line driver.
+- Persistent velocity, density, pressure, divergence, vorticity, particle, and presentation buffers reused across all frames.
+- Coalesced flat-grid cell access plus 18 × 18 shared-memory halo tiles for neighbor-heavy stencil kernels.
+- CUDA streams and events for numerical ordering, GPU timing, and asynchronous pinned-host visualization copies.
 
 - GPU-resident velocity, density, pressure, divergence, and optional vorticity fields.
 - 8,192 GPU-resident Lagrangian tracer particles with storage-buffer ping-pong and instanced rendering.
@@ -24,6 +29,7 @@ There is no backend, runtime package dependency, API key, cloud service, analyti
 
 ```text
 gpu_stable_fluids/
+├── CMakeLists.txt             # Native CUDA/C++ build and architecture configuration
 ├── fluid-simulation.html       # Stable browser entry shell
 ├── package.json                # Dependency-free development commands
 ├── README.md                   # Project overview, usage, design decisions, and maintenance notes
@@ -34,24 +40,44 @@ gpu_stable_fluids/
 │   └── gpu/
 │       ├── shaders.js           # WGSL compute/render source catalog
 │       └── timestamp-profiler.js # Optional asynchronous timestamp-query profiler
+├── cuda/
+│   ├── include/gpu_fluids/     # Native solver, configuration, diagnostics, and output APIs
+│   └── src/                    # CUDA kernels plus CPU command-line visualization driver
 ├── styles/
 │   └── fluid-lab.css           # Design tokens, responsive layout, controls, and accessibility states
 ├── tests/
-│   └── static-contract.mjs     # No-dependency repository and syntax contract checks
+│   ├── static-contract.mjs     # WebGPU repository and syntax contract checks
+│   └── cuda-contract.mjs       # Native CUDA ownership and optimization contract checks
 ├── tools/
 │   └── serve.mjs               # Localhost static server with traversal protection
 ├── .gitignore                  # Local tooling/build output exclusions
 ├── CONTRIBUTING.md             # GPU change, validation, and branch hygiene practices
 └── docs/
     ├── ARCHITECTURE.md         # Runtime components, resource graph, lifecycle, and invariants
+    ├── CUDA_NATIVE.md          # Native CUDA ownership, memory, streams, kernels, and build guide
     ├── CUDA_TO_WEBGPU.md       # CUDA concept mapping, tiled kernels, and portability boundaries
     ├── NUMERICAL_METHOD.md     # Stable Fluids equations, coordinate conventions, and GPU passes
     └── VALIDATION.md            # Static checks, browser smoke tests, and regression checklist
 ```
 
-The browser runtime deliberately has no `node_modules`, bundler, generated assets, or hidden build output. `package.json` contains only development commands and has no dependencies. The documentation is separated into `docs/`, while `src/`, `styles/`, `tests/`, and `tools/` make ownership boundaries explicit.
+The native runtime is built by CMake and the browser preview deliberately has no `node_modules`, bundler, generated assets, or hidden build output. `package.json` contains only preview, serve, and repository-contract commands and has no dependencies. The documentation is separated into `docs/`, while `cuda/`, `src/`, `styles/`, `tests/`, and `tools/` make ownership boundaries explicit.
 
 ## Quick start
+
+### Native CUDA executable
+
+Install the NVIDIA CUDA Toolkit, nvcc, a C++17 compiler, and CMake 3.24 or newer. Configure for the target GPU architecture and build:
+
+    cmake -S . -B build/cuda -DCMAKE_CUDA_ARCHITECTURES=86
+    cmake --build build/cuda --config Release
+
+Run the CPU-controlled CUDA demo. It keeps the simulation on the GPU and exports presentation frames through pinned host memory:
+
+    build/cuda/Release/fluid_cuda_demo.exe --frames 120 --export-every 30
+
+See docs/CUDA_NATIVE.md for the resource graph, kernel strategy, synchronization model, tuning guidance, and native validation boundary. This environment has no nvcc, so native compilation must be performed on a CUDA-capable development machine.
+
+### Portable WebGPU preview
 
 WebGPU is normally available only in a secure context. From this directory, use the built-in dependency-free server:
 
@@ -79,7 +105,7 @@ npm run check
 
 Opening the HTML directly may work in some browsers, but `localhost` is the reliable option for WebGPU’s secure-context and ES-module requirements.
 
-## Browser and hardware target
+## Portable WebGPU preview hardware target
 
 Use a current desktop Chromium-based browser such as Chrome or Edge with WebGPU enabled. The app checks `window.isSecureContext`, `navigator.gpu`, adapter availability, canvas context creation, shader compilation, pipeline creation, and device loss. If initialization fails, the UI shows a human-readable reason and exposes a `Retry GPU` action.
 
@@ -163,7 +189,7 @@ The tracer toggle controls a fully GPU-resident Lagrangian visualization. A 64-t
 
 The tracer overlay also uses a one-invocation GPU pass to write the four-word indirect draw command. The render pass consumes that command directly, so neither particle positions nor the draw count cross the GPU/CPU boundary.
 
-This is CUDA-inspired, not a CUDA runtime. A normal web page cannot execute `.cu` kernels, call cuBLAS/cuFFT, inspect CUDA occupancy counters, or use NVIDIA-only warp intrinsics. The actual implementation is WGSL/WebGPU so it remains portable across supported browser GPUs. The exact concept mapping and a native CUDA porting sketch are in [docs/CUDA_TO_WEBGPU.md](docs/CUDA_TO_WEBGPU.md).
+The native executable is the CUDA Runtime API implementation described in this README. The WebGPU preview is the portable sibling: it mirrors the numerical stages with WGSL but cannot execute `.cu` kernels, call cuBLAS/cuFFT, inspect CUDA occupancy counters, or use NVIDIA-only warp intrinsics. The exact native ownership and tuning model is in [docs/CUDA_NATIVE.md](docs/CUDA_NATIVE.md), while [docs/CUDA_TO_WEBGPU.md](docs/CUDA_TO_WEBGPU.md) documents the portability mapping.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the resource graph and recovery lifecycle. `src/main.js` remains the composition root so the zero-build browser runtime has one owner for pass ordering, while configuration and optional profiling are independently reusable modules.
 
@@ -190,7 +216,7 @@ The pressure solve uses Neumann-like boundary samples, while velocity boundary s
 
 ## Validation performed
 
-The implementation has been checked with JavaScript parsing, diff whitespace checks, static requirement assertions, and a Chrome WebGPU smoke test. The browser test covered initialization, shader compilation, pipeline creation, normal drag painting, color preset selection, turbulent/vorticity mode, auto-demo, pause/resume, clear, responsive layout, and console validation errors.
+The implementation has been checked with JavaScript parsing, diff whitespace checks, WebGPU static requirements, a native CUDA source contract, and a Chrome WebGPU smoke test. nvcc is not installed in the current environment, so the native translation unit still needs a CUDA-capable build machine for compiler and hardware validation. The browser test covered initialization, shader compilation, pipeline creation, normal drag painting, color preset selection, turbulent/vorticity mode, auto-demo, pause/resume, clear, responsive layout, indirect tracer rendering, and console validation errors.
 
 Use [docs/VALIDATION.md](docs/VALIDATION.md) for the repeatable checklist and maintenance guidance.
 

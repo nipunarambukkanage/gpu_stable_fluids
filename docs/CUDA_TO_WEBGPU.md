@@ -81,7 +81,7 @@ The tracer kernel is a separate 64-thread workload. It reads the projected veloc
 
 ## Native CUDA porting sketch
 
-If a native CUDA backend were added outside this browser project, each WGSL compute entry point could become a CUDA kernel with the same 16 × 16 block shape:
+The included native CUDA backend uses the same numerical stages as the preview, with each simulation-grid WGSL compute entry point represented by a CUDA kernel with the same 16 × 16 block shape:
 
 1. Allocate velocity, density, and pressure ping-pong fields in CUDA device memory, with surface or texture access as appropriate.
 2. Replace `var<workgroup>` arrays with `__shared__` arrays sized for the 18 × 18 tile.
@@ -92,7 +92,7 @@ If a native CUDA backend were added outside this browser project, each WGSL comp
 7. Generate device-side draw or dispatch records for future particle compaction or culling, analogous to a CUDA work queue or graph-produced launch parameters.
 8. Add cuFFT only for a deliberately different pressure solver; it is not required by this Jacobi method.
 
-That native backend is deliberately not included here. Adding `.cu` files or a CUDA build toolchain would violate the project’s single-file, zero-cost, browser-runnable constraint and would not make those kernels executable from an ordinary web page.
+The native CUDA backend is included under `cuda/` and is built separately with CMake. The browser WebGPU target remains a portable preview; it cannot execute `.cu` files or expose CUDA-only profiling and occupancy tooling. See [CUDA_NATIVE.md](CUDA_NATIVE.md) for the native build and ownership model.
 
 ## Portability and future work
 

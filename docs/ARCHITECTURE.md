@@ -1,5 +1,7 @@
 # Architecture
 
+The native CUDA C++ target under cuda/ is the primary high-performance execution path. The browser modules remain a portable WebGPU preview with a parallel resource graph, while the native solver owns CUDA Runtime API allocations, streams, events, shared-memory kernels, and CPU-coordinated frame export.
+
 The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
 
 ## Runtime layers

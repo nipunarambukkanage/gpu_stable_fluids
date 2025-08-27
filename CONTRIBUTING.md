@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is a dependency-free browser GPU laboratory. Changes should preserve the local-only runtime, the WebGPU-first design, and the explicit resource ownership described in `docs/ARCHITECTURE.md`.
+This repository contains a native CUDA C++ solver plus a dependency-free WebGPU preview. Changes should preserve local execution, explicit device/host ownership, and the resource lifecycle described in `docs/ARCHITECTURE.md` and `docs/CUDA_NATIVE.md`.
 
 ## Development workflow
 
@@ -8,7 +8,8 @@ This repository is a dependency-free browser GPU laboratory. Changes should pres
 2. Do not add runtime packages, CDN assets, analytics, remote shaders, or backend services.
 3. Run `npm run check` before committing. It validates the module graph, shader inventory, forbidden runtime dependencies, and Node syntax.
 4. Serve the project with `npm run serve` and complete the browser checklist in `docs/VALIDATION.md` on a WebGPU-capable browser.
-5. Update the relevant architecture, numerical, CUDA/WebGPU, and validation documentation when a GPU resource, shader, pass, or synchronization rule changes.
+5. On a CUDA-capable machine, configure and build the native CMake target, then run a short frame-export smoke test.
+6. Update the relevant architecture, numerical, CUDA/WebGPU, native CUDA, and validation documentation when a GPU resource, shader, pass, or synchronization rule changes.
 
 ## GPU change checklist
 
@@ -21,5 +22,16 @@ This repository is a dependency-free browser GPU laboratory. Changes should pres
 - Label new textures, buffers, bind groups, pipelines, and passes for browser diagnostics.
 
 ## Commit and branch hygiene
+
+## Native CUDA checklist
+
+- Keep all device allocations in the solver lifecycle; never allocate or free inside a simulation iteration.
+- Keep row-major X access contiguous for regular cell and particle kernels, and use restrict-qualified pointers when buffers cannot alias.
+- Use shared-memory core-plus-halo tiles only when a stencil reuses neighboring values; keep __syncthreads() uniform across the block.
+- Use separate kernel launches as global synchronization boundaries between ping-pong stages and pressure iterations.
+- Keep the per-frame parameter upload small and asynchronous; do not copy simulation fields or particle positions to the CPU during stepping.
+- Use nonblocking CUDA streams, CUDA events, and pinned host memory for visualization handoff and timing.
+- Keep fast math opt-in and record the target CUDA architecture used for performance comparisons.
+- Run npm run check, then build and run the native CMake target on a CUDA-capable machine before claiming native validation.
 
 Use descriptive commits such as `Add GPU-resident tracer particles and timing`. Review `git diff --check`, confirm the worktree contains only intended files, and push only to the explicitly requested branch and remote.

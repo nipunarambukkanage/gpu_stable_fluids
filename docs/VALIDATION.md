@@ -27,6 +27,16 @@ fluid-simulation.html
 
 Also review that the runtime contains no `TODO`, CDN, runtime `fetch()`, analytics, or external asset reference. `tests/static-contract.mjs` checks module syntax with Node’s parser; the browser then validates WGSL compilation and WebGPU pipeline creation.
 
+## Native CUDA smoke test
+
+On a machine with nvcc, CMake, and an NVIDIA GPU:
+
+    cmake -S . -B build/cuda -DCMAKE_CUDA_ARCHITECTURES=86
+    cmake --build build/cuda --config Release
+    build/cuda/Release/fluid_cuda_demo.exe --frames 4 --export-every 4 --output artifacts/native-frames
+
+Confirm that the executable reports the selected device, compute capability, persistent device memory, divergence register usage, and a non-zero GPU event time. Confirm that the output directory contains a valid PPM frame. Run both vorticity and no-vorticity modes.
+
 ## Browser smoke test
 
 1. Start a free local static server, for example `python -m http.server 8000`.
