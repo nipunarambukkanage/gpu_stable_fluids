@@ -25,6 +25,7 @@ The JavaScript frame coordinator clamps `deltaTime` to the interval `[1/1000, 1/
 - `p(x,y)` — pressure, stored as `r32float`.
 - `div(x,y)` — divergence, stored as `r32float`.
 - `curl(x,y)` — optional scalar vorticity, stored as `r32float`.
+- `xᵢ, ageᵢ` — optional GPU-resident Lagrangian tracer position and lifetime records.
 
 Every field that is written from a previous value uses two textures. A pass reads one side and writes the other; the JavaScript index changes only after the pass has been encoded.
 
@@ -107,6 +108,17 @@ uProjected = u - gradient
 ```
 
 The projection writes the opposite velocity texture and explicitly sets the normal component to zero on all four outer edges. Density is not modified during projection.
+
+## 7. GPU Lagrangian tracers
+
+The optional tracer overlay is advected from the projected velocity field after pressure projection. For each particle record, the compute shader samples the velocity at the particle’s nearest texel and performs a bounded explicit integration:
+
+```text
+xNew = x + deltaTime × 0.5 × u(x)
+ageNew = age + deltaTime
+```
+
+The half-scale factor keeps the visualization stable when a high velocity crosses several texels in one frame. Particles that leave the valid half-texel domain or exceed their deterministic lifetime are respawned using their stored seed and simulation time. Two storage buffers are ping-ponged so the source record is never read and written in the same dispatch. The render pass uses instancing to expand each record into a small additive quad; particle positions never need a CPU readback.
 
 ## Rendering
 

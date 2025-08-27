@@ -7,6 +7,7 @@ There is no backend, package manager, build step, API key, cloud service, analyt
 ## What is included
 
 - GPU-resident velocity, density, pressure, divergence, and optional vorticity fields.
+- 8,192 GPU-resident Lagrangian tracer particles with storage-buffer ping-pong and instanced rendering.
 - Semi-Lagrangian advection with manual bilinear interpolation for `rg32float` velocity textures.
 - Incompressible projection using centered divergence, exactly 20 Jacobi pressure iterations, and pressure-gradient subtraction.
 - Continuous pointer strokes using Pointer Events, pointer capture, coalesced events, pressure-safe timing, and a segment-distance splat falloff.
@@ -14,6 +15,7 @@ There is no backend, package manager, build step, API key, cloud service, analyt
 - Preset scenes for studio, soft ink, long trails, and turbulent ribbon looks.
 - Auto-demo figure-eight flow for hands-off presentation.
 - Local PNG snapshots generated from the presentation canvas; nothing is uploaded.
+- Optional asynchronous GPU timestamp sampling without a per-frame readback stall.
 - Pause/resume, clear/reset, hidden controls, responsive sizing, high-DPI support, visibility-aware timing, and device-loss recovery.
 - Accessible labels, keyboard shortcuts, visible focus states, readable status reporting, and reduced-motion startup behavior.
 
@@ -90,7 +92,9 @@ The GPU resources are created once during initialization and reused:
 - Two `r32float` pressure textures.
 - One `r32float` divergence texture.
 - One `r32float` vorticity texture used by the optional curl enhancement.
+- Two 16-byte-stride particle storage buffers used for GPU-only tracer advection.
 - One 112-byte uniform buffer, cached shader modules, pipeline layouts, pipelines, samplers, texture views, and bind groups.
+- Optional timestamp query set plus resolve/readback buffers when the adapter exposes `timestamp-query`.
 
 Every read/write stage uses distinct ping-pong sides. The JavaScript resource state keeps the currently readable velocity, density, and pressure index explicit. Bind groups are created for every legal index combination during initialization; they are never recreated in the animation loop.
 
@@ -98,6 +102,7 @@ The normal active-frame order is:
 
 ```text
 uniform upload
+  → optional GPU timestamp begin
   → splat injection
   → velocity/density swap
   → semi-Lagrangian advection
@@ -107,7 +112,11 @@ uniform upload
   → 20 Jacobi pressure passes
   → pressure-gradient subtraction
   → velocity swap
+  → 8,192-particle GPU tracer advection
+  → particle-buffer swap
   → full-screen density render
+  → instanced tracer overlay
+  → optional GPU timestamp end + asynchronous resolve
   → one queue submission
 ```
 
@@ -117,7 +126,9 @@ Each Jacobi iteration is a separate compute pass inside the same command encoder
 
 The solver now uses a CUDA-like tiled stencil design while remaining a zero-install browser application. Divergence, pressure, and vorticity kernels cooperatively stage an 18 × 18 tile in `var<workgroup>` memory: 16 × 16 invocations cover the interior and the surrounding one-texel halo supplies neighbor values. A `workgroupBarrier()` then makes the tile visible before the stencil is evaluated. This reduces repeated global texture reads for the neighbor-heavy passes and mirrors the structure of a CUDA `__shared__` tile plus `__syncthreads()`.
 
-The page also reports adapter identity and compute limits, wraps initialization in a WebGPU validation error scope, and handles uncaptured validation errors and device loss. These are WebGPU equivalents of the diagnostics and capability checks expected in a native GPU application.
+The page also reports adapter identity and compute limits, wraps initialization in a WebGPU validation error scope, and handles uncaptured validation errors and device loss. When available, `timestamp-query` measures the complete GPU frame asynchronously every 30 frames; the timer never maps a buffer or waits for GPU completion inside the animation loop. These are WebGPU equivalents of the diagnostics and capability checks expected in a native GPU application.
+
+The tracer toggle controls a fully GPU-resident Lagrangian visualization. A 64-thread compute kernel samples the projected velocity field, integrates each particle, respawns escaped or expired particles deterministically, and swaps storage buffers. An instanced render pipeline draws all particles without a CPU position readback; disabling the toggle skips both the compute and overlay draw.
 
 This is CUDA-inspired, not a CUDA runtime. A normal web page cannot execute `.cu` kernels, call cuBLAS/cuFFT, inspect CUDA occupancy counters, or use NVIDIA-only warp intrinsics. The actual implementation is WGSL/WebGPU so it remains portable across supported browser GPUs. The exact concept mapping and a native CUDA porting sketch are in [docs/CUDA_TO_WEBGPU.md](docs/CUDA_TO_WEBGPU.md).
 

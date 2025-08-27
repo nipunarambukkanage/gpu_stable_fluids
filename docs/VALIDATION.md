@@ -30,18 +30,20 @@ Also review that the file contains no `TODO`, CDN, package import, runtime `fetc
 2. Open `http://localhost:8000/fluid-simulation.html` in a current desktop Chrome or Edge build with WebGPU.
 3. Confirm the status panel reaches `Ready`.
 4. Confirm resolution is `512 × 512`, pressure is `20 iterations`, and FPS becomes populated.
-5. Drag slowly and quickly across the canvas. Strokes should be continuous and directionally aligned.
-6. Hold the pointer still. Ink should continue without a large new velocity impulse.
-7. Select each ink preset and verify the input value, active swatch, and rendered hue change.
-8. Select `Turbulent ribbon`, confirm vorticity shows a non-zero value, and watch for curls without validation errors.
-9. Start and stop `Auto demo`. The button label and status should change, and the figure-eight should remain inside the domain.
-10. Pause and resume. The field should freeze and resume without a time-step jump.
-11. Clear. The field should become empty, simulation time should reset to `0.0 s`, and pointer history should be cleared.
-12. Use `Save PNG` and confirm a local PNG download is generated.
-13. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
-14. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
-15. Hide and show the document, then resume. No large burst or instability should appear after returning.
-16. Inspect the browser console. Normal operation should produce no WebGPU validation error.
+5. If the adapter exposes timestamp queries, confirm `GPU frame` eventually shows a millisecond value; otherwise it should report `Not exposed` without affecting simulation startup.
+6. Drag slowly and quickly across the canvas. Strokes should be continuous and directionally aligned.
+7. Hold the pointer still. Ink should continue without a large new velocity impulse.
+8. Select each ink preset and verify the input value, active swatch, and rendered hue change.
+9. Select `Turbulent ribbon`, confirm vorticity shows a non-zero value, and watch for curls without validation errors.
+10. Toggle `GPU tracer particles` off and on. The status should change between `Off` and `8,192 active`, with no GPU validation error.
+11. Start and stop `Auto demo`. The button label and status should change, and the figure-eight should remain inside the domain.
+12. Pause and resume. The field should freeze and resume without a time-step jump.
+13. Clear. The field should become empty, simulation time should reset to `0.0 s`, and pointer history should be cleared.
+14. Use `Save PNG` and confirm a local PNG download is generated.
+15. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
+16. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
+17. Hide and show the document, then resume. No large burst or instability should appear after returning.
+18. Inspect the browser console. Normal operation should produce no WebGPU validation error.
 
 ## Resource and shader review
 
@@ -49,6 +51,10 @@ Also review that the file contains no `TODO`, CDN, package import, runtime `fetc
 - Every compute entry point guards global invocation IDs against width and height before loads/stores.
 - Divergence, pressure, and vorticity stage an 18 × 18 tile and synchronize with `workgroupBarrier()` before neighbor reads.
 - The adapter status reports `adapter.info` and the kernel status reports the workgroup shape plus the device invocation limit.
+- Optional timestamp buffers are created only after the adapter advertises `timestamp-query`; unsupported adapters stay on the unsynchronized path.
+- Tracer buffers use `STORAGE | COPY_DST`, are initialized identically, and swap only after the tracer compute pass.
+- The tracer compute dispatch uses 64-thread workgroups and exactly `ceil(8192 / 64)` workgroups.
+- The tracer overlay uses instanced rendering and additive blending without a CPU particle readback.
 - `rg32float` velocity, `rgba16float` density, `r32float` pressure, divergence, and vorticity formats match their bind-group layouts.
 - Storage destinations are never the sampled source in the same pass.
 - The uniform buffer is 112 bytes and each WGSL `vec4<f32>` slot is 16-byte aligned.

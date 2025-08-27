@@ -33,6 +33,7 @@ HTML / CSS interface
 | Pressure | 2 | `r32float` | Jacobi pressure ping-pong state. |
 | Divergence | 1 | `r32float` | Centered velocity divergence. |
 | Vorticity | 1 | `r32float` | Optional scalar curl field. |
+| Tracer particles | 2 | 16-byte storage records | GPU-resident positions, ages, and deterministic seeds. |
 | Uniform buffer | 1 | 112 bytes | Per-frame parameters with seven 16-byte slots. |
 
 All simulation textures use `TEXTURE_BINDING`, `STORAGE_BINDING`, and `COPY_DST`. The fixed simulation grid is 512 × 512; presentation dimensions are independent and may change with CSS size and device pixel ratio.
@@ -47,19 +48,29 @@ Bind groups are built once after texture views and layouts exist. The cached com
 - Gradient: four combinations of final pressure index and velocity read index.
 - Vorticity: two velocity read-index variants.
 - Confinement: two velocity read-index variants, reading the single vorticity texture and writing the opposite velocity side.
+- Tracer compute: four combinations of velocity read index and particle source index, writing the opposite particle buffer.
 - Render: two density read-index variants.
+- Tracer render: two particle read-index variants, using instanced quads.
 
 No simulation texture is sampled and storage-written in the same pass. The JavaScript index fields make the current readable side explicit and are swapped only after encoding the pass that writes the opposite side.
 
 ## Frame coordinator
 
-`encodeSimulationFrame()` performs one command encoder and one queue submission for a normal frame. The five base compute stages are always ordered as splat, advection, divergence, pressure, and gradient. When vorticity strength is non-zero, curl and confinement are inserted between advection and divergence. The pressure loop encodes exactly 20 separate compute passes in the same command encoder.
+`encodeSimulationFrame()` performs one command encoder and one queue submission for a normal frame. The five base compute stages are always ordered as splat, advection, divergence, pressure, and gradient. When vorticity strength is non-zero, curl and confinement are inserted between advection and divergence. When tracers are enabled, a 64-thread particle advection dispatch runs after the final projected velocity is available and before the render pass. The pressure loop encodes exactly 20 separate compute passes in the same command encoder.
 
-The loop does not map buffers, read textures back to the CPU, wait for GPU completion, or create pipelines/bind groups. Only the per-frame uniform upload and transient encoder/pass descriptors occur in the hot path.
+The loop does not map buffers, read textures back to the CPU, wait for GPU completion, or create pipelines/bind groups. Only the per-frame uniform upload and transient encoder/pass descriptors occur in the hot path. On adapters exposing `timestamp-query`, one sampled frame every 30 iterations adds two timestamp writes and an asynchronous readback request; all other frames remain unchanged.
 
 ## Tiled stencil execution
 
 Divergence, pressure, and vorticity use CUDA-style workgroup tiling. Each 16 × 16 workgroup stages an 18 × 18 core-plus-halo tile in `var<workgroup>` memory, reaches `workgroupBarrier()`, and then evaluates the neighbor stencil from the tile. This keeps the synchronization local to each workgroup while avoiding repeated global neighbor loads inside those kernels. See [CUDA_TO_WEBGPU.md](CUDA_TO_WEBGPU.md) for the portable API mapping and limitations.
+
+## GPU-resident tracers
+
+The optional tracer stage is a separate GPU workload rather than a CPU visualization layer. Two storage buffers contain 8,192 records of `{ position, age, seed }`. The compute pass samples the current projected velocity texture, advances all records with bounded explicit integration, respawns escaped particles, and swaps the source/destination buffer index. The render pass then draws six vertices per instance with an additive blend pipeline. No particle position crosses the GPU/CPU boundary during normal operation.
+
+## Optional GPU timing
+
+Initialization negotiates the optional `timestamp-query` feature only when the adapter advertises it. The timer owns a two-query timestamp set, a 16-byte resolve buffer, and a 16-byte `MAP_READ` buffer. A sampled command encoder writes timestamps immediately before and after the full simulation/render sequence, resolves the pair, copies the result, and submits normally. A later asynchronous task waits for submitted work, maps the small readback, converts the nanosecond delta to milliseconds, and releases the mapping. Device teardown destroys the timer resources with the rest of the GPU graph.
 
 ## Initialization and recovery
 

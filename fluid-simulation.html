@@ -253,6 +253,24 @@
       font-size: 0.78rem;
     }
 
+    .check-field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
+    .check-field input {
+      width: 1.05rem;
+      height: 1.05rem;
+      margin: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
     output {
       color: var(--accent-strong);
       font-variant-numeric: tabular-nums;
@@ -451,6 +469,8 @@
         <div class="status-line"><span>WebGPU</span><span id="gpuStatus" class="status-value" data-tone="warning">Starting…</span></div>
         <div class="status-line"><span>GPU adapter</span><span id="gpuAdapterStatus" class="status-value">Detecting…</span></div>
         <div class="status-line"><span>Kernel config</span><span id="kernelStatus" class="status-value">16 × 16 / 256</span></div>
+        <div class="status-line"><span>GPU frame</span><span id="gpuTimeStatus" class="status-value">Optional timer</span></div>
+        <div class="status-line"><span>GPU tracers</span><span id="tracerStatus" class="status-value">8,192 active</span></div>
         <div class="status-line"><span>Resolution</span><span id="resolutionStatus" class="status-value">512 × 512</span></div>
         <div class="status-line"><span>Frame rate</span><span id="fpsStatus" class="status-value">— FPS</span></div>
         <div class="status-line"><span>Pressure</span><span id="pressureStatus" class="status-value">20 iterations</span></div>
@@ -513,6 +533,7 @@
           <label class="field-label" for="vorticityForce"><span>Vortex confinement</span><output id="vorticityForceValue">Off</output></label>
           <input id="vorticityForce" type="range" min="0" max="1.5" step="0.05" value="0" aria-describedby="vorticityForceValue">
         </div>
+        <label class="check-field" for="tracerToggle"><span>GPU tracer particles</span><input id="tracerToggle" type="checkbox" checked></label>
       </fieldset>
 
       <div class="button-row">
@@ -543,6 +564,10 @@
     const MAX_POINTER_VELOCITY = 1800;
     const MAX_DENSITY = 12;
     const MAX_EFFECTIVE_DPR = 2;
+    const PARTICLE_COUNT = 8192;
+    const PARTICLE_WORKGROUP_SIZE = 64;
+    const PARTICLE_WORKGROUPS = Math.ceil(PARTICLE_COUNT / PARTICLE_WORKGROUP_SIZE);
+    const PARTICLE_BUFFER_SIZE = PARTICLE_COUNT * 4 * Float32Array.BYTES_PER_ELEMENT;
     const UNIFORM_FLOAT_COUNT = 28;
     const UNIFORM_BUFFER_SIZE = UNIFORM_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
     const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -571,6 +596,8 @@
     const colorPresetButtons = Array.from(document.querySelectorAll(".color-swatch"));
     const gpuAdapterStatus = document.getElementById("gpuAdapterStatus");
     const kernelStatus = document.getElementById("kernelStatus");
+    const gpuTimeStatus = document.getElementById("gpuTimeStatus");
+    const tracerStatus = document.getElementById("tracerStatus");
     const brushRadiusValue = document.getElementById("brushRadiusValue");
     const velocityForceValue = document.getElementById("velocityForceValue");
     const inkAmountValue = document.getElementById("inkAmountValue");
@@ -582,6 +609,7 @@
     const scenePresetValue = document.getElementById("scenePresetValue");
     const vorticityForceInput = document.getElementById("vorticityForce");
     const vorticityForceValue = document.getElementById("vorticityForceValue");
+    const tracerToggle = document.getElementById("tracerToggle");
     const demoButton = document.getElementById("demoButton");
     const snapshotButton = document.getElementById("snapshotButton");
 
@@ -608,6 +636,16 @@
       density: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
       scalar: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 4)
     };
+    const initialParticleData = new Float32Array(PARTICLE_COUNT * 4);
+    for (let particleIndex = 0; particleIndex < PARTICLE_COUNT; particleIndex += 1) {
+      const seed = (Math.imul(particleIndex, 1664525) + 1013904223) >>> 0;
+      const secondSeed = (Math.imul(seed, 22695477) + 1) >>> 0;
+      const offset = particleIndex * 4;
+      initialParticleData[offset] = 0.5 + (seed / 4294967296) * (GRID_WIDTH - 1);
+      initialParticleData[offset + 1] = 0.5 + (secondSeed / 4294967296) * (GRID_HEIGHT - 1);
+      initialParticleData[offset + 2] = ((particleIndex % 240) / 240) * 4;
+      initialParticleData[offset + 3] = seed / 4294967296;
+    }
 
     const app = {
       adapter: null,
@@ -615,6 +653,8 @@
       context: null,
       canvasFormat: null,
       resources: null,
+      particlesEnabled: true,
+      gpuTimer: null,
       available: false,
       initializing: false,
       paused: prefersReducedMotion,
@@ -1204,6 +1244,61 @@
       }
     `;
 
+    const particleComputeShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
+      };
+
+      struct Particle {
+        position: vec2<f32>,
+        age: f32,
+        seed: f32,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var velocityTexture: texture_2d<f32>;
+      @group(0) @binding(2) var<storage, read> particleSource: array<Particle>;
+      @group(0) @binding(3) var<storage, read_write> particleDestination: array<Particle>;
+
+      fn hash(value: f32) -> f32 {
+        return fract(sin(value * 12.9898) * 43758.5453);
+      }
+
+      @compute @workgroup_size(64, 1, 1)
+      fn main(@builtin(global_invocation_id) globalId: vec3<u32>) {
+        if (globalId.x >= ${PARTICLE_COUNT}u) {
+          return;
+        }
+
+        let particle = particleSource[globalId.x];
+        let grid = params.gridPointer.xy;
+        let coordinate = clamp(vec2<i32>(particle.position), vec2<i32>(0), vec2<i32>(i32(grid.x - 1.0), i32(grid.y - 1.0)));
+        let velocity = textureLoad(velocityTexture, coordinate, 0).xy;
+        let deltaTime = params.timeDtDissipation.y;
+        var nextPosition = particle.position + velocity * deltaTime * 0.5;
+        var nextAge = particle.age + deltaTime;
+        let lifetime = 2.0 + hash(particle.seed * 31.7) * 5.0;
+        let escaped = nextPosition.x < 0.5 || nextPosition.x >= grid.x - 0.5 || nextPosition.y < 0.5 || nextPosition.y >= grid.y - 0.5;
+
+        if (escaped || nextAge >= lifetime) {
+          let spawnTime = params.timeDtDissipation.x * 0.17;
+          nextPosition = vec2<f32>(
+            0.5 + hash(particle.seed * 17.1 + spawnTime) * (grid.x - 1.0),
+            0.5 + hash(particle.seed * 29.3 + spawnTime + 4.0) * (grid.y - 1.0)
+          );
+          nextAge = 0.0;
+        }
+
+        particleDestination[globalId.x] = Particle(nextPosition, nextAge, particle.seed);
+      }
+    `;
+
     // 5. WGSL rendering shaders
     const renderVertexShaderCode = `
       struct VertexOutput {
@@ -1245,6 +1340,62 @@
       }
     `;
 
+    const particleVertexShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
+      };
+
+      struct Particle {
+        position: vec2<f32>,
+        age: f32,
+        seed: f32,
+      };
+
+      struct VertexOutput {
+        @builtin(position) position: vec4<f32>,
+        @location(0) color: vec4<f32>,
+      };
+
+      @group(0) @binding(0) var<uniform> params: SimParams;
+      @group(0) @binding(1) var<storage, read> particles: array<Particle>;
+
+      @vertex
+      fn main(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOutput {
+        var positions = array<vec2<f32>, 6>(
+          vec2<f32>(-1.0, -1.0),
+          vec2<f32>(1.0, -1.0),
+          vec2<f32>(-1.0, 1.0),
+          vec2<f32>(-1.0, 1.0),
+          vec2<f32>(1.0, -1.0),
+          vec2<f32>(1.0, 1.0)
+        );
+        let particle = particles[instanceIndex];
+        let grid = params.gridPointer.xy;
+        let clipCenter = vec2<f32>(particle.position.x / grid.x * 2.0 - 1.0, 1.0 - particle.position.y / grid.y * 2.0);
+        let quadSize = vec2<f32>(3.0 / grid.x, 3.0 / grid.y);
+        let hue = fract(particle.seed * 7.31);
+        let color = mix(vec3<f32>(0.32, 0.86, 1.0), vec3<f32>(1.0, 0.38, 0.78), hue);
+        let fade = 0.14 + 0.18 * (1.0 - smoothstep(0.0, 7.0, particle.age));
+        var output: VertexOutput;
+        output.position = vec4<f32>(clipCenter + positions[vertexIndex] * quadSize, 0.0, 1.0);
+        output.color = vec4<f32>(color, fade);
+        return output;
+      }
+    `;
+
+    const particleFragmentShaderCode = `
+      @fragment
+      fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
+        return color;
+      }
+    `;
+
     // 6. WebGPU initialization
     function setStatus(message, tone = "normal") {
       statusMessage.textContent = message;
@@ -1273,6 +1424,7 @@
       inkDissipationInput.disabled = disabled;
       scenePresetInput.disabled = disabled;
       vorticityForceInput.disabled = disabled;
+      tracerToggle.disabled = disabled;
       pauseButton.disabled = disabled;
       clearButton.disabled = disabled;
       demoButton.disabled = disabled;
@@ -1291,22 +1443,40 @@
       compatibilityCard.hidden = true;
     }
 
-    function updateAdapterTelemetry(adapter) {
+    function updateAdapterTelemetry(adapter, gpuTimer = null) {
       const adapterInfo = adapter.info || {};
       const adapterLabel = adapterInfo.description || adapterInfo.device || [adapterInfo.vendor, adapterInfo.architecture].filter(Boolean).join(" · ") || "Local WebGPU adapter";
       const maximumInvocations = adapter.limits?.maxComputeInvocationsPerWorkgroup || 256;
       const maximumDispatches = adapter.limits?.maxComputeWorkgroupsPerDimension || 65535;
+      const timestampFeatureAvailable = adapter.features?.has?.("timestamp-query") ?? false;
       gpuAdapterStatus.textContent = adapterLabel;
       gpuAdapterStatus.title = adapterLabel;
       kernelStatus.textContent = `${WORKGROUP_SIZE} × ${WORKGROUP_SIZE} / ${maximumInvocations}`;
-      kernelStatus.title = `Dispatch limit: ${maximumDispatches.toLocaleString()} workgroups per dimension`;
+      kernelStatus.title = `Fluid tile: ${WORKGROUP_SIZE} × ${WORKGROUP_SIZE}; tracer: ${PARTICLE_WORKGROUP_SIZE} threads; dispatch limit: ${maximumDispatches.toLocaleString()} workgroups per dimension`;
+      gpuTimeStatus.textContent = gpuTimer?.enabled ? "Timestamp ready" : timestampFeatureAvailable ? "Feature available" : "Not exposed";
+      gpuTimeStatus.title = gpuTimer?.enabled
+        ? "Asynchronous timestamp-query samples are collected every 30 frames."
+        : timestampFeatureAvailable
+          ? "The adapter advertises timestamp-query, but the timer could not be created."
+          : "This adapter does not expose the optional WebGPU timestamp-query feature.";
     }
 
     function destroyGpuResources() {
+      if (app.gpuTimer) {
+        app.gpuTimer.querySet?.destroy();
+        app.gpuTimer.resolveBuffer?.destroy();
+        app.gpuTimer.readbackBuffer?.destroy();
+      }
+      app.gpuTimer = null;
       if (app.resources) {
         for (const textureGroup of Object.values(app.resources.textures)) {
           for (const texture of Array.isArray(textureGroup) ? textureGroup : [textureGroup]) {
             texture?.destroy();
+          }
+        }
+        for (const bufferGroup of Object.values(app.resources.buffers || {})) {
+          for (const buffer of Array.isArray(bufferGroup) ? bufferGroup : [bufferGroup]) {
+            buffer?.destroy();
           }
         }
         app.resources.uniformBuffer?.destroy();
@@ -1317,6 +1487,58 @@
       app.device = null;
       app.context = null;
       app.canvasFormat = null;
+    }
+
+    function createGpuTimer(device) {
+      if (!device.features?.has?.("timestamp-query")) {
+        return null;
+      }
+      try {
+        const querySet = device.createQuerySet({ label: "Stable fluids GPU timestamp queries", type: "timestamp", count: 2 });
+        const resolveBuffer = device.createBuffer({
+          label: "Resolved GPU timestamps",
+          size: 16,
+          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC
+        });
+        const readbackBuffer = device.createBuffer({
+          label: "Mapped GPU timestamp readback",
+          size: 16,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        return { device, querySet, resolveBuffer, readbackBuffer, enabled: true, pending: false, frameCounter: 0, sampleEvery: 30 };
+      } catch (error) {
+        console.warn("Optional GPU timestamp timer unavailable:", error);
+        return null;
+      }
+    }
+
+    async function readGpuTimestamp(timer) {
+      if (!timer || timer.pending) {
+        return;
+      }
+      timer.pending = true;
+      try {
+        await timer.device.queue.onSubmittedWorkDone();
+        if (app.gpuTimer !== timer || app.device !== timer.device) {
+          return;
+        }
+        await timer.readbackBuffer.mapAsync(GPUMapMode.READ);
+        const timestamps = new BigUint64Array(timer.readbackBuffer.getMappedRange());
+        const durationMilliseconds = Number(timestamps[1] - timestamps[0]) / 1_000_000;
+        timer.readbackBuffer.unmap();
+        if (app.gpuTimer === timer && app.device === timer.device && Number.isFinite(durationMilliseconds)) {
+          gpuTimeStatus.textContent = `${durationMilliseconds.toFixed(2)} ms`;
+          gpuTimeStatus.title = "Asynchronous timestamp-query sample for the complete simulation and render command sequence.";
+        }
+      } catch (error) {
+        if (app.gpuTimer === timer) {
+          timer.enabled = false;
+          gpuTimeStatus.textContent = "Timer unavailable";
+          gpuTimeStatus.title = error instanceof Error ? error.message : "GPU timestamp readback failed.";
+        }
+      } finally {
+        timer.pending = false;
+      }
     }
 
     function createSimulationTexture(device, label, format) {
@@ -1404,6 +1626,15 @@
           { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rg32float", viewDimension: "2d" } }
         ]
       });
+      const particles = device.createBindGroupLayout({
+        label: "GPU tracer compute bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, buffer: { type: "read-only-storage" } },
+          { binding: 3, visibility: computeVisibility, buffer: { type: "storage" } }
+        ]
+      });
       const render = device.createBindGroupLayout({
         label: "Render bind group layout",
         entries: [
@@ -1411,7 +1642,14 @@
           { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
         ]
       });
-      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, render };
+      const particleRender = device.createBindGroupLayout({
+        label: "GPU tracer render bind group layout",
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+          { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } }
+        ]
+      });
+      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, particles, render, particleRender };
     }
 
     async function createShaderModule(device, code, label) {
@@ -1428,7 +1666,7 @@
     }
 
     async function createPipelines(device, layouts) {
-      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vorticityModule, confinementModule, vertexModule, fragmentModule] = await Promise.all([
+      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vorticityModule, confinementModule, particleComputeModule, vertexModule, fragmentModule, particleVertexModule, particleFragmentModule] = await Promise.all([
         createShaderModule(device, splatShaderCode, "Splat shader"),
         createShaderModule(device, advectionShaderCode, "Advection shader"),
         createShaderModule(device, divergenceShaderCode, "Divergence shader"),
@@ -1436,8 +1674,11 @@
         createShaderModule(device, gradientShaderCode, "Gradient shader"),
         createShaderModule(device, vorticityShaderCode, "Vorticity shader"),
         createShaderModule(device, confinementShaderCode, "Vorticity confinement shader"),
+        createShaderModule(device, particleComputeShaderCode, "GPU tracer compute shader"),
         createShaderModule(device, renderVertexShaderCode, "Render vertex shader"),
-        createShaderModule(device, renderFragmentShaderCode, "Render fragment shader")
+        createShaderModule(device, renderFragmentShaderCode, "Render fragment shader"),
+        createShaderModule(device, particleVertexShaderCode, "GPU tracer vertex shader"),
+        createShaderModule(device, particleFragmentShaderCode, "GPU tracer fragment shader")
       ]);
 
       const pipelineLayouts = {
@@ -1448,7 +1689,9 @@
         gradient: device.createPipelineLayout({ label: "Pressure gradient pipeline layout", bindGroupLayouts: [layouts.gradient] }),
         vorticity: device.createPipelineLayout({ label: "Vorticity pipeline layout", bindGroupLayouts: [layouts.vorticity] }),
         confinement: device.createPipelineLayout({ label: "Vorticity confinement pipeline layout", bindGroupLayouts: [layouts.confinement] }),
-        render: device.createPipelineLayout({ label: "Density render pipeline layout", bindGroupLayouts: [layouts.render] })
+        particles: device.createPipelineLayout({ label: "GPU tracer compute pipeline layout", bindGroupLayouts: [layouts.particles] }),
+        render: device.createPipelineLayout({ label: "Density render pipeline layout", bindGroupLayouts: [layouts.render] }),
+        particleRender: device.createPipelineLayout({ label: "GPU tracer render pipeline layout", bindGroupLayouts: [layouts.particleRender] })
       };
 
       return {
@@ -1460,8 +1703,11 @@
           gradient: gradientModule,
           vorticity: vorticityModule,
           confinement: confinementModule,
+          particles: particleComputeModule,
           vertex: vertexModule,
-          fragment: fragmentModule
+          fragment: fragmentModule,
+          particleVertex: particleVertexModule,
+          particleFragment: particleFragmentModule
         },
         pipelineLayouts,
         pipelines: {
@@ -1500,11 +1746,33 @@
             layout: pipelineLayouts.confinement,
             compute: { module: confinementModule, entryPoint: "main" }
           }),
+          particles: device.createComputePipeline({
+            label: "GPU tracer compute pipeline",
+            layout: pipelineLayouts.particles,
+            compute: { module: particleComputeModule, entryPoint: "main" }
+          }),
           render: device.createRenderPipeline({
             label: "Density render pipeline",
             layout: pipelineLayouts.render,
             vertex: { module: vertexModule, entryPoint: "main" },
             fragment: { module: fragmentModule, entryPoint: "main", targets: [{ format: app.canvasFormat }] },
+            primitive: { topology: "triangle-list" }
+          }),
+          particleRender: device.createRenderPipeline({
+            label: "GPU tracer render pipeline",
+            layout: pipelineLayouts.particleRender,
+            vertex: { module: particleVertexModule, entryPoint: "main" },
+            fragment: {
+              module: particleFragmentModule,
+              entryPoint: "main",
+              targets: [{
+                format: app.canvasFormat,
+                blend: {
+                  color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                  alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+                }
+              }]
+            },
             primitive: { topology: "triangle-list" }
           })
         }
@@ -1525,7 +1793,19 @@
       }));
     }
 
-    function createBindGroups(device, layouts, uniformBuffer, views, sampler) {
+    function createParticleBuffers(device) {
+      const buffers = [0, 1].map((index) => device.createBuffer({
+        label: `GPU tracer particle buffer ${index}`,
+        size: PARTICLE_BUFFER_SIZE,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+      }));
+      for (const buffer of buffers) {
+        device.queue.writeBuffer(buffer, 0, initialParticleData);
+      }
+      return buffers;
+    }
+
+    function createBindGroups(device, layouts, uniformBuffer, views, sampler, particleBuffers) {
       const splat = createSplatOrAdvectionBindGroups(device, layouts.splat, uniformBuffer, views, "Splat");
       const advection = createSplatOrAdvectionBindGroups(device, layouts.advection, uniformBuffer, views, "Advection");
       const divergence = [0, 1].map((readIndex) => device.createBindGroup({
@@ -1576,6 +1856,16 @@
           { binding: 3, resource: views.velocity[1 - velocityIndex] }
         ]
       }));
+      const particles = [0, 1].map((velocityIndex) => [0, 1].map((particleIndex) => device.createBindGroup({
+        label: `GPU tracer compute bind group v${velocityIndex} p${particleIndex}`,
+        layout: layouts.particles,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.velocity[velocityIndex] },
+          { binding: 2, resource: { buffer: particleBuffers[particleIndex] } },
+          { binding: 3, resource: { buffer: particleBuffers[1 - particleIndex] } }
+        ]
+      })));
       const render = [0, 1].map((densityIndex) => device.createBindGroup({
         label: `Render bind group ${densityIndex}`,
         layout: layouts.render,
@@ -1584,7 +1874,15 @@
           { binding: 1, resource: sampler }
         ]
       }));
-      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, render };
+      const particleRender = [0, 1].map((particleIndex) => device.createBindGroup({
+        label: `GPU tracer render bind group ${particleIndex}`,
+        layout: layouts.particleRender,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: { buffer: particleBuffers[particleIndex] } }
+        ]
+      }));
+      return { splat, advection, divergence, pressure, gradient, vorticity, confinement, particles, render, particleRender };
     }
 
     async function createGpuResources(device) {
@@ -1609,14 +1907,16 @@
         divergence: createSimulationTexture(device, "Divergence", "r32float"),
         vorticity: createSimulationTexture(device, "Vorticity", "r32float")
       };
+      const particleBuffers = createParticleBuffers(device);
       const views = createTextureViews(textures);
       const sampler = device.createSampler({ label: "Linear presentation sampler", minFilter: "linear", magFilter: "linear" });
       const layouts = createBindGroupLayouts(device);
       const pipelineBundle = await createPipelines(device, layouts);
-      const bindGroups = createBindGroups(device, layouts, uniformBuffer, views, sampler);
+      const bindGroups = createBindGroups(device, layouts, uniformBuffer, views, sampler, particleBuffers);
       return {
         uniformBuffer,
         textures,
+        buffers: { particles: particleBuffers },
         views,
         sampler,
         layouts,
@@ -1654,9 +1954,13 @@
       }
       writeZeroTexture(app.resources.textures.divergence, zeroTextureData.scalar, GRID_WIDTH * 4);
       writeZeroTexture(app.resources.textures.vorticity, zeroTextureData.scalar, GRID_WIDTH * 4);
+      for (const buffer of app.resources.buffers.particles) {
+        app.device.queue.writeBuffer(buffer, 0, initialParticleData);
+      }
       app.resources.velocityIndex = 0;
       app.resources.densityIndex = 0;
       app.resources.pressureIndex = 0;
+      app.resources.particleIndex = 0;
       resetPointerState();
       app.simulationTime = 0;
       app.lastFrameTime = null;
@@ -1715,7 +2019,22 @@
         if (!adapter) {
           throw new Error("No compatible WebGPU adapter was found. Check that the browser and local GPU support WebGPU.");
         }
-        const device = await adapter.requestDevice();
+        const adapterLimits = adapter.limits || {};
+        const minimumTileThreads = WORKGROUP_SIZE * WORKGROUP_SIZE;
+        if ((adapterLimits.maxComputeInvocationsPerWorkgroup || 0) < minimumTileThreads || (adapterLimits.maxComputeWorkgroupSizeX || 0) < WORKGROUP_SIZE || (adapterLimits.maxComputeWorkgroupSizeY || 0) < WORKGROUP_SIZE) {
+          throw new Error(`This GPU does not support the required ${WORKGROUP_SIZE} × ${WORKGROUP_SIZE} fluid workgroup.`);
+        }
+        if ((adapterLimits.maxStorageBufferBindingSize || 0) < PARTICLE_BUFFER_SIZE) {
+          throw new Error("This GPU does not expose enough storage-buffer capacity for the tracer workload.");
+        }
+        const optionalFeatures = adapter.features?.has?.("timestamp-query") ? ["timestamp-query"] : [];
+        const requiredLimits = {
+          maxComputeInvocationsPerWorkgroup: minimumTileThreads,
+          maxComputeWorkgroupSizeX: WORKGROUP_SIZE,
+          maxComputeWorkgroupSizeY: WORKGROUP_SIZE,
+          maxStorageBufferBindingSize: PARTICLE_BUFFER_SIZE
+        };
+        const device = await adapter.requestDevice({ requiredFeatures: optionalFeatures, requiredLimits });
         const context = canvas.getContext("webgpu");
         if (!context) {
           throw new Error("Could not acquire a WebGPU canvas context.");
@@ -1725,7 +2044,8 @@
         app.device = device;
         app.context = context;
         app.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
-        updateAdapterTelemetry(adapter);
+        app.gpuTimer = createGpuTimer(device);
+        updateAdapterTelemetry(adapter, app.gpuTimer);
         device.onuncapturederror = handleUncapturedError;
         device.lost.then((info) => handleDeviceLost(device, info)).catch((error) => console.error("Device-loss handler failed:", error));
         device.pushErrorScope("validation");
@@ -1834,17 +2154,18 @@
       pointer.hasPendingMotion = false;
     }
 
-    function encodeComputePass(commandEncoder, pipeline, bindGroup, label) {
-      const computePass = commandEncoder.beginComputePass({ label });
+    function encodeComputePass(commandEncoder, pipeline, bindGroup, label, options = {}) {
+      const computePass = commandEncoder.beginComputePass({ label, timestampWrites: options.timestampWrites });
       computePass.setPipeline(pipeline);
       computePass.setBindGroup(0, bindGroup);
-      computePass.dispatchWorkgroups(WORKGROUPS_X, WORKGROUPS_Y, 1);
+      computePass.dispatchWorkgroups(options.workgroupsX ?? WORKGROUPS_X, options.workgroupsY ?? WORKGROUPS_Y, options.workgroupsZ ?? 1);
       computePass.end();
     }
 
-    function encodeRenderPass(commandEncoder) {
+    function encodeRenderPass(commandEncoder, timestampWrites = undefined) {
       const renderPass = commandEncoder.beginRenderPass({
         label: "Density presentation pass",
+        timestampWrites,
         colorAttachments: [{
           view: app.context.getCurrentTexture().createView({ label: "Presentation view" }),
           clearValue: { r: 0.002, g: 0.006, b: 0.012, a: 1 },
@@ -1855,6 +2176,11 @@
       renderPass.setPipeline(app.resources.pipelines.render);
       renderPass.setBindGroup(0, app.resources.bindGroups.render[app.resources.densityIndex]);
       renderPass.draw(6, 1, 0, 0);
+      if (app.particlesEnabled) {
+        renderPass.setPipeline(app.resources.pipelines.particleRender);
+        renderPass.setBindGroup(0, app.resources.bindGroups.particleRender[app.resources.particleIndex]);
+        renderPass.draw(6, PARTICLE_COUNT, 0, 0);
+      }
       renderPass.end();
     }
 
@@ -1866,9 +2192,22 @@
       const resources = app.resources;
       updateUniformBuffer(deltaTime);
       const commandEncoder = app.device.createCommandEncoder({ label: "Stable fluids frame" });
-
-      // Splat reads the current velocity/density pair and writes the opposite pair.
-      encodeComputePass(commandEncoder, resources.pipelines.splat, resources.bindGroups.splat[resources.velocityIndex], "Splat injection pass");
+      const gpuTimer = app.gpuTimer;
+      const shouldSampleGpuTime = Boolean(gpuTimer?.enabled && !gpuTimer.pending && gpuTimer.frameCounter % gpuTimer.sampleEvery === 0);
+      if (gpuTimer) {
+        gpuTimer.frameCounter += 1;
+      }
+      if (shouldSampleGpuTime) {
+        encodeComputePass(
+          commandEncoder,
+          resources.pipelines.splat,
+          resources.bindGroups.splat[resources.velocityIndex],
+          "Splat injection pass",
+          { timestampWrites: { querySet: gpuTimer.querySet, beginningOfPassWriteIndex: 0 } }
+        );
+      } else {
+        encodeComputePass(commandEncoder, resources.pipelines.splat, resources.bindGroups.splat[resources.velocityIndex], "Splat injection pass");
+      }
       resources.velocityIndex = 1 - resources.velocityIndex;
       resources.densityIndex = 1 - resources.densityIndex;
 
@@ -1900,8 +2239,26 @@
       );
       resources.velocityIndex = 1 - resources.velocityIndex;
 
-      encodeRenderPass(commandEncoder);
+      if (app.particlesEnabled) {
+        encodeComputePass(
+          commandEncoder,
+          resources.pipelines.particles,
+          resources.bindGroups.particles[resources.velocityIndex][resources.particleIndex],
+          "GPU tracer advection pass",
+          { workgroupsX: PARTICLE_WORKGROUPS, workgroupsY: 1 }
+        );
+        resources.particleIndex = 1 - resources.particleIndex;
+      }
+
+      encodeRenderPass(commandEncoder, shouldSampleGpuTime ? { querySet: gpuTimer.querySet, endOfPassWriteIndex: 1 } : undefined);
+      if (shouldSampleGpuTime) {
+        commandEncoder.resolveQuerySet(gpuTimer.querySet, 0, 2, gpuTimer.resolveBuffer, 0);
+        commandEncoder.copyBufferToBuffer(gpuTimer.resolveBuffer, 0, gpuTimer.readbackBuffer, 0, 16);
+      }
       app.device.queue.submit([commandEncoder.finish()]);
+      if (shouldSampleGpuTime) {
+        readGpuTimestamp(gpuTimer);
+      }
     }
 
     // 11. Rendering
@@ -2149,6 +2506,14 @@
       scenePresetValue.textContent = scenePresetInput.options[scenePresetInput.selectedIndex].textContent;
     }
 
+    function updateTracerState() {
+      app.particlesEnabled = tracerToggle.checked;
+      tracerStatus.textContent = app.particlesEnabled ? `${PARTICLE_COUNT.toLocaleString()} active` : "Off";
+      tracerStatus.title = app.particlesEnabled
+        ? `${PARTICLE_COUNT.toLocaleString()} GPU-resident Lagrangian tracers are advected in a dedicated compute pass.`
+        : "GPU tracer compute and rendering are disabled.";
+    }
+
     function selectInkPreset(event) {
       const presetButton = event.currentTarget;
       inkColorInput.value = presetButton.dataset.color;
@@ -2365,10 +2730,12 @@
 
     function setupInteractionAndUi() {
       updateControlReadouts();
+      updateTracerState();
       for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput, vorticityForceInput]) {
         input.addEventListener("input", updateControlReadouts);
       }
       scenePresetInput.addEventListener("change", applyScenePreset);
+      tracerToggle.addEventListener("change", updateTracerState);
       for (const presetButton of colorPresetButtons) {
         presetButton.addEventListener("click", selectInkPreset);
       }

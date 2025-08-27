@@ -16,12 +16,21 @@ WebGPU is a browser API with portable compute and graphics access. It does not e
 | `__syncthreads()` | `workgroupBarrier()` |
 | Global texture/array loads | `textureLoad()` from sampled float textures |
 | Surface/global writes | `textureStore()` to storage textures |
+| Device arrays / structured buffers | `var<storage>` particle records with explicit ping-pong buffers |
+| GPU-driven instancing | `draw(6, 8192, ...)` with `instance_index` in the vertex shader |
 | Constant memory / symbol upload | One 112-byte uniform buffer updated with `queue.writeBuffer()` |
 | Stream-ordered command work | Compute passes encoded in one `GPUCommandEncoder` and submitted once |
 | CUDA error checks | `pushErrorScope()` / `popErrorScope()`, uncaptured errors, and `device.lost` |
 | Device capability query | `adapter.info` and `adapter.limits`, shown in the status panel |
+| CUDA events / GPU elapsed time | Optional WebGPU `timestamp-query`, sampled asynchronously every 30 frames |
 
 The mapping is structural. It does not imply identical compiler behavior, cache policies, occupancy, warp scheduling, or numerical results across APIs.
+
+## Profiling without a synchronization trap
+
+When the adapter exposes `timestamp-query`, initialization requests the feature and creates a two-entry timestamp query set plus two small 16-byte buffers. A sampled command encoder writes a start timestamp before the first compute pass and an end timestamp after the render pass, resolves the query set, copies it to the map-readable buffer, and submits with the same queue path as every other frame.
+
+The CPU does not map that buffer immediately. A background readback waits for submitted work only after the sampled submission has been queued, converts the GPU timestamp delta to milliseconds, and unmaps the buffer. Sampling is throttled to every 30 frames and is suppressed while an earlier readback is pending. This mirrors CUDA event timing while avoiding a `cudaDeviceSynchronize()`-style stall in the steady-state animation loop. If the feature is unavailable or a readback fails, the UI reports the limitation and the simulation continues without timing.
 
 ## Tiled stencil kernels
 
@@ -62,8 +71,11 @@ The resource graph uses explicit ping-pong fields:
 - two `rgba16float` density textures;
 - two `r32float` pressure textures;
 - one divergence texture and one optional vorticity texture.
+- two 16-byte-stride particle storage buffers for GPU-only Lagrangian tracers.
 
 Every pass samples one side and stores to the other side. This preserves WebGPU usage rules and corresponds to the explicit source/destination allocations commonly used in CUDA stencil pipelines.
+
+The tracer kernel is a separate 64-thread workload. It reads the projected velocity texture and one particle buffer, writes the opposite particle buffer, and dispatches `ceil(8192 / 64)` workgroups. The following render pass uses `instance_index` to draw six vertices per particle directly from the active storage buffer. This is the portable equivalent of a CUDA device-array update followed by a GPU-driven visualization draw, with no host-side particle synchronization.
 
 ## Native CUDA porting sketch
 
