@@ -268,6 +268,26 @@
       cursor: pointer;
     }
 
+    .color-palette {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.4rem;
+      margin-top: 0.05rem;
+    }
+
+    .color-swatch {
+      min-height: 1.7rem;
+      padding: 0;
+      border-color: rgba(255, 255, 255, 0.22);
+      background: var(--swatch);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.22);
+    }
+
+    .color-swatch[aria-pressed="true"] {
+      border-color: var(--accent-strong);
+      box-shadow: inset 0 0 0 2px rgba(4, 12, 20, 0.74), 0 0 0 1px var(--accent-strong);
+    }
+
     input[type="range"] {
       width: 100%;
       margin: 0;
@@ -421,6 +441,12 @@
         <div class="field">
           <label class="field-label" for="inkColor"><span>Ink color</span><output id="inkColorValue">#48B7FF</output></label>
           <input id="inkColor" type="color" value="#48b7ff" aria-describedby="inkColorValue">
+          <div class="color-palette" role="group" aria-label="Ink color presets">
+            <button class="color-swatch" type="button" data-color="#48b7ff" style="--swatch:#48b7ff" aria-label="Cyan ink preset" aria-pressed="true"></button>
+            <button class="color-swatch" type="button" data-color="#ff5fb3" style="--swatch:#ff5fb3" aria-label="Pink ink preset" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#a7ff83" style="--swatch:#a7ff83" aria-label="Lime ink preset" aria-pressed="false"></button>
+            <button class="color-swatch" type="button" data-color="#ffc857" style="--swatch:#ffc857" aria-label="Amber ink preset" aria-pressed="false"></button>
+          </div>
         </div>
         <div class="field">
           <label class="field-label" for="brushRadius"><span>Brush radius</span><output id="brushRadiusValue">18 texels</output></label>
@@ -495,6 +521,7 @@
     const velocityDissipationInput = document.getElementById("velocityDissipation");
     const inkDissipationInput = document.getElementById("inkDissipation");
     const inkColorValue = document.getElementById("inkColorValue");
+    const colorPresetButtons = Array.from(document.querySelectorAll(".color-swatch"));
     const brushRadiusValue = document.getElementById("brushRadiusValue");
     const velocityForceValue = document.getElementById("velocityForceValue");
     const inkAmountValue = document.getElementById("inkAmountValue");
@@ -509,6 +536,14 @@
     // 16..19: injected velocity x/y, velocity-force multiplier, ink amount.
     // 20..23: ink color RGB, render exposure.
     const uniformData = new Float32Array(UNIFORM_FLOAT_COUNT);
+    const simulationSettings = {
+      brushRadius: 18,
+      velocityForce: 1,
+      inkAmount: 1.8,
+      velocityDissipation: 0.08,
+      inkDissipation: 0.025,
+      exposure: 0.72
+    };
     const zeroTextureData = {
       velocity: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
       density: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
@@ -891,9 +926,11 @@
       @fragment
       fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         let density = max(textureSample(densityTexture, linearSampler, uv).rgb, vec3<f32>(0.0));
-        let exposure = 1.35;
-        let mapped = 1.0 - exp(-density * exposure);
-        let gammaCorrected = pow(mapped, vec3<f32>(1.0 / 2.2));
+        let intensity = max(max(density.r, density.g), density.b);
+        let chroma = density / max(intensity, 0.0001);
+        let mappedIntensity = 1.0 - exp(-intensity * 0.72);
+        let displayColor = chroma * mappedIntensity;
+        let gammaCorrected = pow(displayColor, vec3<f32>(1.0 / 2.2));
         return vec4<f32>(gammaCorrected, 1.0);
       }
     `;
@@ -916,6 +953,9 @@
 
     function setGpuControlsDisabled(disabled) {
       inkColorInput.disabled = disabled;
+      for (const presetButton of colorPresetButtons) {
+        presetButton.disabled = disabled;
+      }
       brushRadiusInput.disabled = disabled;
       velocityForceInput.disabled = disabled;
       inkAmountInput.disabled = disabled;
@@ -1361,12 +1401,12 @@
 
       uniformData[0] = app.simulationTime;
       uniformData[1] = deltaTime;
-      uniformData[2] = Number.parseFloat(velocityDissipationInput.value);
-      uniformData[3] = Number.parseFloat(inkDissipationInput.value);
+      uniformData[2] = simulationSettings.velocityDissipation;
+      uniformData[3] = simulationSettings.inkDissipation;
       uniformData[4] = GRID_WIDTH;
       uniformData[5] = GRID_HEIGHT;
       uniformData[6] = pointer.active ? 1 : 0;
-      uniformData[7] = Number.parseFloat(brushRadiusInput.value);
+      uniformData[7] = simulationSettings.brushRadius;
       uniformData[8] = startX;
       uniformData[9] = startY;
       uniformData[10] = 0;
@@ -1377,12 +1417,12 @@
       uniformData[15] = 0;
       uniformData[16] = injectedVelocityX;
       uniformData[17] = injectedVelocityY;
-      uniformData[18] = Number.parseFloat(velocityForceInput.value);
-      uniformData[19] = Number.parseFloat(inkAmountInput.value);
+      uniformData[18] = simulationSettings.velocityForce;
+      uniformData[19] = simulationSettings.inkAmount;
       uniformData[20] = inkColorComponents[0];
       uniformData[21] = inkColorComponents[1];
       uniformData[22] = inkColorComponents[2];
-      uniformData[23] = 1.35;
+      uniformData[23] = simulationSettings.exposure;
 
       app.device.queue.writeBuffer(resources.uniformBuffer, 0, uniformData);
 
@@ -1666,13 +1706,28 @@
     }
 
     function updateControlReadouts() {
+      simulationSettings.brushRadius = Number.parseFloat(brushRadiusInput.value);
+      simulationSettings.velocityForce = Number.parseFloat(velocityForceInput.value);
+      simulationSettings.inkAmount = Number.parseFloat(inkAmountInput.value);
+      simulationSettings.velocityDissipation = Number.parseFloat(velocityDissipationInput.value);
+      simulationSettings.inkDissipation = Number.parseFloat(inkDissipationInput.value);
       refreshInkColorComponents();
+      const selectedColor = inkColorInput.value.toLowerCase();
+      for (const presetButton of colorPresetButtons) {
+        presetButton.setAttribute("aria-pressed", String(presetButton.dataset.color === selectedColor));
+      }
       inkColorValue.textContent = inkColorInput.value.toUpperCase();
       brushRadiusValue.textContent = `${brushRadiusInput.value} texels`;
       velocityForceValue.textContent = `${Number.parseFloat(velocityForceInput.value).toFixed(2)}×`;
       inkAmountValue.textContent = Number.parseFloat(inkAmountInput.value).toFixed(2);
       velocityDissipationValue.textContent = Number.parseFloat(velocityDissipationInput.value).toFixed(2);
       inkDissipationValue.textContent = Number.parseFloat(inkDissipationInput.value).toFixed(3);
+    }
+
+    function selectInkPreset(event) {
+      const presetButton = event.currentTarget;
+      inkColorInput.value = presetButton.dataset.color;
+      updateControlReadouts();
     }
 
     function togglePause() {
@@ -1782,6 +1837,9 @@
       updateControlReadouts();
       for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput]) {
         input.addEventListener("input", updateControlReadouts);
+      }
+      for (const presetButton of colorPresetButtons) {
+        presetButton.addEventListener("click", selectInkPreset);
       }
       pauseButton.addEventListener("click", togglePause);
       clearButton.addEventListener("click", clearSimulation);
