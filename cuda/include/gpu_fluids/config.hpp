@@ -16,6 +16,14 @@ constexpr int kParticleCount = 8192;
 constexpr int kParticleBlockSize = 128;
 constexpr int kParticleBlocks = (kParticleCount + kParticleBlockSize - 1) / kParticleBlockSize;
 constexpr int kTileExtent = kBlockSize + 2;
+constexpr int kSphParticleCount = 32768;
+constexpr int kSphParticleBlockSize = 128;
+constexpr int kSphParticleBlocks = (kSphParticleCount + kSphParticleBlockSize - 1) / kSphParticleBlockSize;
+constexpr float kSphSmoothingRadius = 8.0F;
+constexpr int kSphGridWidth = static_cast<int>(kGridWidth / kSphSmoothingRadius);
+constexpr int kSphGridHeight = static_cast<int>(kGridHeight / kSphSmoothingRadius);
+constexpr int kSphCellCount = kSphGridWidth * kSphGridHeight;
+constexpr int kSphMaxParticlesPerCell = 128;
 
 struct alignas(16) SimulationParams {
   float time = 0.0F;
@@ -56,6 +64,30 @@ struct alignas(16) SimulationParams {
 
 static_assert(sizeof(SimulationParams) == 112, "SimulationParams must remain seven 16-byte constant-memory slots");
 
+struct alignas(16) SphParams {
+  float deltaTime = 1.0F / 120.0F;
+  float smoothingRadius = kSphSmoothingRadius;
+  float restDensity = 6.0F;
+  float particleMass = 1.0F;
+
+  float pressureStiffness = 2.6F;
+  float viscosity = 0.18F;
+  float gravityX = 0.0F;
+  float gravityY = 140.0F;
+
+  float worldWidth = static_cast<float>(kGridWidth);
+  float worldHeight = static_cast<float>(kGridHeight);
+  float cellSize = kSphSmoothingRadius;
+  float boundaryDamping = 0.58F;
+
+  float colorPhase = 0.0F;
+  float reserved0 = 0.0F;
+  float reserved1 = 0.0F;
+  float reserved2 = 0.0F;
+};
+
+static_assert(sizeof(SphParams) == 64, "SphParams must remain four 16-byte constant-memory slots");
+
 struct SolverConfig {
   int pressureIterations = kPressureIterations;
   bool enableVorticity = true;
@@ -80,6 +112,7 @@ struct FrameStats {
   std::size_t persistentDeviceBytes = 0;
   int pressureIterations = kPressureIterations;
   int activeParticles = kParticleCount;
+  std::uint32_t neighborOverflow = 0;
 };
 
 }  // namespace gpu_fluids

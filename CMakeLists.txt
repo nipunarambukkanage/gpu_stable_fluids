@@ -14,6 +14,7 @@ find_package(CUDAToolkit REQUIRED)
 
 add_library(fluid_cuda STATIC
   cuda/src/solver.cu
+  cuda/src/sph_solver.cu
   cuda/src/visualization.cpp
 )
 

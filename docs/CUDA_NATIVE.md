@@ -27,6 +27,7 @@ The browser WebGPU page remains a portable preview. The native path is not a wra
     │   └── visualization.hpp  # CPU frame-export contract
     └── src/
         ├── solver.cu          # kernels plus CUDA resource lifecycle
+        ├── sph_solver.cu      # SPH neighbor grid, forces, integration, and rendering
         ├── main.cpp           # CPU controls and demo workload
         └── visualization.cpp  # CPU PPM writer
 
@@ -48,6 +49,7 @@ On a single-configuration generator, the executable is usually at:
 Useful controls:
 
 - --no-vorticity disables the optional curl and confinement stages.
+- --mode sph selects the GPU SPH pipeline with uniform-grid neighbor search.
 - --pressure-iterations N changes the Jacobi iteration count for experiments.
 - --device N selects the CUDA device index owned by the CPU driver.
 - --output DIR selects the CPU-side PPM output directory.
@@ -88,6 +90,10 @@ The compute stream is the owner of numerical ordering. Separate kernel launches 
 The copy stream waits on a CUDA event recorded after the render kernel. It then performs an asynchronous device-to-pinned-host copy. A caller that needs to present or export a frame calls downloadFrame, which synchronizes only the copy stream at that presentation boundary. Simulation control and kernel recording stay asynchronous.
 
 CUDA events bracket the complete numerical and render sequence. Frame statistics use cudaEventElapsedTime after the frame is ready, so timing measures GPU work rather than CPU submission time. Checked CUDA errors are raised after every kernel launch and every runtime API call.
+
+## SPH neighbor-search pipeline
+
+The SPH mode keeps particle state in structure-of-arrays buffers so position and velocity components are independently coalesced. Each step clears a fixed-capacity uniform grid, inserts one particle per CUDA thread with atomic cell counters, computes density and pressure from the nine neighboring cells, computes pressure and viscosity forces, integrates velocity and position, applies boundary damping, and renders a particle field on the GPU. A device overflow counter is copied with the frame so capacity pressure is visible instead of silently hidden.
 
 ## Numerical sequence
 

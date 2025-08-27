@@ -1,5 +1,6 @@
 #include "gpu_fluids/config.hpp"
 #include "gpu_fluids/solver.hpp"
+#include "gpu_fluids/sph_solver.hpp"
 #include "gpu_fluids/visualization.hpp"
 
 #include <cmath>
@@ -16,6 +17,7 @@
 namespace {
 
 struct CliOptions {
+  std::string mode = "stable";
   int frames = 120;
   int exportEvery = 30;
   int pressureIterations = gpu_fluids::kPressureIterations;
@@ -28,6 +30,7 @@ struct CliOptions {
 void printUsage() {
   std::cout
       << "fluid_cuda_demo [options]\n"
+      << "  --mode stable|sph          Select Eulerian grid or particle SPH simulation\n"
       << "  --frames N                 Number of GPU frames to run (default: 120)\n"
       << "  --export-every N           Export every Nth frame as PPM (default: 30)\n"
       << "  --pressure-iterations N    Jacobi iterations per frame (default: 20)\n"
@@ -72,12 +75,14 @@ CliOptions parseArguments(int argc, char** argv) {
       options.quiet = true;
       continue;
     }
-    if (argument == "--frames" || argument == "--export-every" || argument == "--pressure-iterations" || argument == "--device" || argument == "--output") {
+    if (argument == "--mode" || argument == "--frames" || argument == "--export-every" || argument == "--pressure-iterations" || argument == "--device" || argument == "--output") {
       if (index + 1 >= argc) {
         throw std::invalid_argument(argument + " requires a value");
       }
       const std::string value = argv[++index];
-      if (argument == "--frames") {
+      if (argument == "--mode") {
+        options.mode = value;
+      } else if (argument == "--frames") {
         options.frames = parsePositive(value, "--frames");
       } else if (argument == "--export-every") {
         options.exportEvery = parsePositive(value, "--export-every");
@@ -91,6 +96,9 @@ CliOptions parseArguments(int argc, char** argv) {
       continue;
     }
     throw std::invalid_argument("Unknown option: " + argument);
+  }
+  if (options.mode != "stable" && options.mode != "sph") {
+    throw std::invalid_argument("--mode must be stable or sph");
   }
   return options;
 }
@@ -120,6 +128,16 @@ gpu_fluids::SimulationParams makeDemoParams(int frame, bool enableVorticity) {
   return params;
 }
 
+gpu_fluids::SphParams makeSphParams(int frame) {
+  gpu_fluids::SphParams params;
+  params.deltaTime = 1.0F / 120.0F;
+  params.pressureStiffness = 2.6F;
+  params.viscosity = 0.18F;
+  params.gravityY = 140.0F;
+  params.colorPhase = static_cast<float>(frame) * 0.025F;
+  return params;
+}
+
 std::string formatMilliseconds(float milliseconds) {
   std::ostringstream value;
   value << std::fixed << std::setprecision(3) << milliseconds << " ms";
@@ -132,6 +150,36 @@ int main(int argc, char** argv) {
   try {
     const CliOptions options = parseArguments(argc, argv);
     std::filesystem::create_directories(options.outputDirectory);
+
+    if (options.mode == "sph") {
+      gpu_fluids::SphSolver solver({}, options.deviceIndex);
+      const auto& metrics = solver.deviceMetrics();
+      if (!options.quiet) {
+        std::cout << "CUDA SPH fluids\n"
+                  << "  device: " << metrics.name << " (sm " << metrics.computeCapabilityMajor << "."
+                  << metrics.computeCapabilityMinor << ")\n"
+                  << "  particles: " << gpu_fluids::kSphParticleCount
+                  << ", uniform grid: " << gpu_fluids::kSphGridWidth << " x " << gpu_fluids::kSphGridHeight << "\n"
+                  << "  persistent device memory: " << solver.lastFrameStats().persistentDeviceBytes << " bytes\n";
+      }
+      std::vector<std::uint8_t> rgba(static_cast<std::size_t>(solver.width()) * solver.height() * 4);
+      for (int frame = 0; frame < options.frames; ++frame) {
+        solver.step(makeSphParams(frame));
+        if ((frame + 1) % options.exportEvery == 0 || frame + 1 == options.frames) {
+          solver.downloadFrame(rgba);
+          std::ostringstream filename;
+          filename << "sph-frame-" << std::setw(5) << std::setfill('0') << (frame + 1) << ".ppm";
+          gpu_fluids::writePpm(options.outputDirectory / filename.str(), solver.width(), solver.height(), rgba.data());
+          if (!options.quiet) {
+            const auto& stats = solver.lastFrameStats();
+            std::cout << "  frame " << stats.frameIndex << ": " << formatMilliseconds(stats.gpuMilliseconds)
+                      << ", neighbor overflow " << stats.neighborOverflow
+                      << ", exported " << filename.str() << "\n";
+          }
+        }
+      }
+      return 0;
+    }
 
     gpu_fluids::SolverConfig config;
     config.pressureIterations = options.pressureIterations;

@@ -5,9 +5,11 @@ const requiredFiles = [
   "cuda/include/gpu_fluids/config.hpp",
   "cuda/include/gpu_fluids/cuda_utils.hpp",
   "cuda/include/gpu_fluids/solver.hpp",
+  "cuda/include/gpu_fluids/sph_solver.hpp",
   "cuda/include/gpu_fluids/visualization.hpp",
   "cuda/src/main.cpp",
   "cuda/src/solver.cu",
+  "cuda/src/sph_solver.cu",
   "cuda/src/visualization.cpp",
   "docs/CUDA_NATIVE.md"
 ];
@@ -25,7 +27,9 @@ for (const filePath of requiredFiles) {
 
 const cmake = read("CMakeLists.txt");
 const solver = read("cuda/src/solver.cu");
+const sphSolver = read("cuda/src/sph_solver.cu");
 const header = read("cuda/include/gpu_fluids/solver.hpp");
+const sphHeader = read("cuda/include/gpu_fluids/sph_solver.hpp");
 const config = read("cuda/include/gpu_fluids/config.hpp");
 const cli = read("cuda/src/main.cpp");
 
@@ -46,8 +50,14 @@ assert(solver.includes("cudaHostAlloc"), "visualization output must use pinned h
 assert(solver.includes("cudaStreamWaitEvent"), "copy coordination must be stream-ordered");
 assert(solver.includes("launchPressure"), "CPU orchestration must keep global synchronization between pressure stages");
 assert(solver.includes("pressureJacobiKernel<<<"), "pressure iterations must be distinct kernel launches");
+assert(sphSolver.includes("__global__ void buildSpatialGridKernel"), "SPH mode must build a GPU uniform neighbor grid");
+assert(sphSolver.includes("atomicAdd"), "SPH neighbor insertion must use GPU atomic indexing");
+assert(sphSolver.includes("densityPressureKernel") && sphSolver.includes("forceKernel"), "SPH mode must separate density/pressure and force stages");
+assert(sphSolver.includes("cellParticles"), "SPH mode must retain a device-resident cell-to-particle index");
+assert(sphSolver.includes("cudaMemcpyToSymbolAsync"), "SPH controls must use asynchronous constant-memory upload");
+assert(sphHeader.includes("class SphSolver"), "SPH mode must expose a CPU orchestration boundary");
 assert(cli.includes("writePpm"), "CPU visualization coordination must export device-generated frames");
-assert(!new RegExp(forbiddenMarker, "i").test([cmake, solver, header, config, cli].join("\n")), "native CUDA source must remain unrelated to external integrations");
+assert(!new RegExp(forbiddenMarker, "i").test([cmake, solver, sphSolver, header, sphHeader, config, cli].join("\n")), "native CUDA source must remain unrelated to external integrations");
 
 if (failures.length > 0) {
   console.error("cuda-contract: failed");

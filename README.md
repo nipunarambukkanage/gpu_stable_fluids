@@ -7,6 +7,7 @@ The native path is organized as an industrial CMake project with persistent devi
 ## What is included
 
 - Native CUDA C++ solver with CUDA Runtime API lifecycle management and a CPU-owned command-line driver.
+- GPU SPH mode with SoA particle arrays, uniform-grid neighbor indexing, density/pressure, force, integration, boundary, and GPU rendering stages.
 - Persistent velocity, density, pressure, divergence, vorticity, particle, and presentation buffers reused across all frames.
 - Coalesced flat-grid cell access plus 18 × 18 shared-memory halo tiles for neighbor-heavy stencil kernels.
 - CUDA streams and events for numerical ordering, GPU timing, and asynchronous pinned-host visualization copies.
@@ -74,6 +75,10 @@ Install the NVIDIA CUDA Toolkit, nvcc, a C++17 compiler, and CMake 3.24 or newer
 Run the CPU-controlled CUDA demo. It keeps the simulation on the GPU and exports presentation frames through pinned host memory:
 
     build/cuda/Release/fluid_cuda_demo.exe --frames 120 --export-every 30
+
+Run the particle-based SPH pipeline:
+
+    build/cuda/Release/fluid_cuda_demo.exe --mode sph --frames 120 --export-every 30
 
 See docs/CUDA_NATIVE.md for the resource graph, kernel strategy, synchronization model, tuning guidance, and native validation boundary. This environment has no nvcc, so native compilation must be performed on a CUDA-capable development machine.
 

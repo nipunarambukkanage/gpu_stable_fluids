@@ -37,6 +37,12 @@ On a machine with nvcc, CMake, and an NVIDIA GPU:
 
 Confirm that the executable reports the selected device, compute capability, persistent device memory, divergence register usage, and a non-zero GPU event time. Confirm that the output directory contains a valid PPM frame. Run both vorticity and no-vorticity modes.
 
+Run the SPH path as well:
+
+    build/cuda/Release/fluid_cuda_demo.exe --mode sph --frames 4 --export-every 4 --output artifacts/native-frames
+
+Confirm that the SPH run reports the uniform neighbor-grid dimensions and a neighbor-overflow count. A non-zero overflow count is a capacity signal that should drive a grid-capacity tuning decision.
+
 ## Browser smoke test
 
 1. Start a free local static server, for example `python -m http.server 8000`.
