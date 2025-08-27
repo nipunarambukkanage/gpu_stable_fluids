@@ -1,6 +1,6 @@
 # CUDA concepts translated to WebGPU
 
-This document explains how the fluid lab uses CUDA-style GPU engineering ideas without pretending that a browser page is running CUDA. The executable implementation is still one dependency-free `fluid-simulation.html` file using WebGPU and WGSL.
+This document explains how the fluid lab uses CUDA-style GPU engineering ideas without pretending that a browser page is running CUDA. The executable implementation is a dependency-free HTML shell plus ES modules under `src/`; the WGSL catalog lives in `src/gpu/shaders.js` and the runtime uses WebGPU.
 
 ## Capability boundary
 

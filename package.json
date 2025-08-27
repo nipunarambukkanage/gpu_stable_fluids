@@ -1,0 +1,11 @@
+{
+  "name": "gpu-stable-fluids-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dependency-free WebGPU stable fluids laboratory with CUDA-inspired GPU workloads",
+  "type": "module",
+  "scripts": {
+    "check": "node tests/static-contract.mjs",
+    "serve": "node tools/serve.mjs"
+  }
+}

@@ -7,10 +7,13 @@ This checklist is designed for a dependency-free project. It uses local browser 
 From the project directory:
 
 ```bash
+node tests/static-contract.mjs
 git diff --check
 ```
 
-The HTML should contain exactly one runnable document:
+The same checks are exposed as `npm run check`; `package.json` has no dependencies.
+
+The repository should contain exactly one runnable HTML document:
 
 ```bash
 rg --files -g '*.html'
@@ -22,7 +25,7 @@ Expected output:
 fluid-simulation.html
 ```
 
-Also review that the file contains no `TODO`, CDN, package import, runtime `fetch()`, analytics, or external asset reference. The JavaScript can be syntax-checked by extracting the inline script in an editor or browser console; the implementation has already been checked with `new Function()` parsing.
+Also review that the runtime contains no `TODO`, CDN, runtime `fetch()`, analytics, or external asset reference. `tests/static-contract.mjs` checks module syntax with Node’s parser; the browser then validates WGSL compilation and WebGPU pipeline creation.
 
 ## Browser smoke test
 

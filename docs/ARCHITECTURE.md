@@ -1,17 +1,17 @@
 # Architecture
 
-This project intentionally keeps the executable surface in `fluid-simulation.html`. That file is the portable artifact: it contains the semantic interface, responsive CSS, application state, WGSL source strings, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, and startup. The `docs/` directory holds engineering documentation without introducing runtime dependencies.
+The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
 
 ## Runtime layers
 
 ```text
-HTML / CSS interface
+HTML shell + external CSS
         │
         ├── control state and accessibility updates
         ├── pointer samples → simulation-space stroke segment
         └── resize / visibility / recovery events
                          │
-                  JavaScript frame coordinator
+                  `src/main.js` frame coordinator
                          │
         ┌────────────────┴────────────────┐
         │                                 │

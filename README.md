@@ -2,7 +2,7 @@
 
 An interactive 2D incompressible fluid simulator that runs entirely in the browser on the user’s local GPU. The project implements Jos Stam’s Stable Fluids approach with WebGPU compute shaders and WGSL, with a fixed 512 × 512 simulation grid and a responsive presentation canvas.
 
-There is no backend, package manager, build step, API key, cloud service, analytics, or external asset. The application is intentionally delivered as one self-contained HTML file so it can be copied, archived, or served from any simple local static server.
+There is no backend, runtime package dependency, API key, cloud service, analytics, or external asset. The application is delivered as a small industrial-style source tree: an HTML shell, an external stylesheet, browser ES modules, and dependency-free validation/serve tooling. It can be copied, archived, or served from any simple local static server.
 
 ## What is included
 
@@ -23,8 +23,24 @@ There is no backend, package manager, build step, API key, cloud service, analyt
 
 ```text
 gpu_stable_fluids/
-├── fluid-simulation.html       # Complete runnable application: HTML, CSS, JS, and WGSL
+├── fluid-simulation.html       # Stable browser entry shell
+├── package.json                # Dependency-free development commands
 ├── README.md                   # Project overview, usage, design decisions, and maintenance notes
+├── src/
+│   ├── main.js                 # Application coordinator, WebGPU graph, UI, and input
+│   ├── config/
+│   │   └── simulation.js       # Shared grid, workload, buffer, and particle constants
+│   └── gpu/
+│       ├── shaders.js           # WGSL compute/render source catalog
+│       └── timestamp-profiler.js # Optional asynchronous timestamp-query profiler
+├── styles/
+│   └── fluid-lab.css           # Design tokens, responsive layout, controls, and accessibility states
+├── tests/
+│   └── static-contract.mjs     # No-dependency repository and syntax contract checks
+├── tools/
+│   └── serve.mjs               # Localhost static server with traversal protection
+├── .gitignore                  # Local tooling/build output exclusions
+├── CONTRIBUTING.md             # GPU change, validation, and branch hygiene practices
 └── docs/
     ├── ARCHITECTURE.md         # Runtime components, resource graph, lifecycle, and invariants
     ├── CUDA_TO_WEBGPU.md       # CUDA concept mapping, tiled kernels, and portability boundaries
@@ -32,11 +48,17 @@ gpu_stable_fluids/
     └── VALIDATION.md            # Static checks, browser smoke tests, and regression checklist
 ```
 
-The runtime deliberately has no `node_modules`, `package.json`, bundler, generated assets, or hidden build output. The documentation is separated into `docs/` so the implementation remains portable while the engineering details remain easy to navigate.
+The browser runtime deliberately has no `node_modules`, bundler, generated assets, or hidden build output. `package.json` contains only development commands and has no dependencies. The documentation is separated into `docs/`, while `src/`, `styles/`, `tests/`, and `tools/` make ownership boundaries explicit.
 
 ## Quick start
 
-WebGPU is normally available only in a secure context. From this directory, use any free local static server. If Python is already installed:
+WebGPU is normally available only in a secure context. From this directory, use the built-in dependency-free server:
+
+```bash
+npm run serve
+```
+
+Or use any free local static server. If Python is already installed:
 
 ```bash
 python -m http.server 8000
@@ -48,7 +70,13 @@ Then open:
 http://localhost:8000/fluid-simulation.html
 ```
 
-No installation is required by this project. Opening the HTML directly may work in some browsers, but `localhost` is the reliable option for WebGPU’s secure-context requirement.
+No installation or dependency install is required by this project. Run the repository contract checks with:
+
+```bash
+npm run check
+```
+
+Opening the HTML directly may work in some browsers, but `localhost` is the reliable option for WebGPU’s secure-context and ES-module requirements.
 
 ## Browser and hardware target
 
@@ -132,7 +160,7 @@ The tracer toggle controls a fully GPU-resident Lagrangian visualization. A 64-t
 
 This is CUDA-inspired, not a CUDA runtime. A normal web page cannot execute `.cu` kernels, call cuBLAS/cuFFT, inspect CUDA occupancy counters, or use NVIDIA-only warp intrinsics. The actual implementation is WGSL/WebGPU so it remains portable across supported browser GPUs. The exact concept mapping and a native CUDA porting sketch are in [docs/CUDA_TO_WEBGPU.md](docs/CUDA_TO_WEBGPU.md).
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the resource graph and recovery lifecycle.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the resource graph and recovery lifecycle. `src/main.js` remains the composition root so the zero-build browser runtime has one owner for pass ordering, while configuration and optional profiling are independently reusable modules.
 
 ## Numerical conventions
 
