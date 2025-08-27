@@ -895,7 +895,393 @@
       }
     `;
 
-    // Later sections append WebGPU initialization, interaction, and the loop.
+    // 6. WebGPU initialization
+    function setStatus(message, tone = "normal") {
+      statusMessage.textContent = message;
+      gpuStatus.dataset.tone = tone;
+    }
+
+    function setGpuState(label, tone = "normal") {
+      gpuStatus.textContent = label;
+      gpuStatus.dataset.tone = tone;
+    }
+
+    function updatePauseButton() {
+      pauseButton.textContent = app.paused ? "Resume" : "Pause";
+      pauseButton.setAttribute("aria-label", app.paused ? "Resume simulation" : "Pause simulation");
+    }
+
+    function setGpuControlsDisabled(disabled) {
+      inkColorInput.disabled = disabled;
+      brushRadiusInput.disabled = disabled;
+      velocityForceInput.disabled = disabled;
+      inkAmountInput.disabled = disabled;
+      velocityDissipationInput.disabled = disabled;
+      inkDissipationInput.disabled = disabled;
+      pauseButton.disabled = disabled;
+      clearButton.disabled = disabled;
+      canvas.style.cursor = disabled ? "not-allowed" : "crosshair";
+      updatePauseButton();
+    }
+
+    function showCompatibility(title, message) {
+      compatibilityCard.querySelector("h1").textContent = title;
+      compatibilityMessage.textContent = message;
+      compatibilityCard.hidden = false;
+    }
+
+    function hideCompatibility() {
+      compatibilityCard.hidden = true;
+    }
+
+    function destroyGpuResources() {
+      if (app.resources) {
+        for (const textureGroup of Object.values(app.resources.textures)) {
+          for (const texture of Array.isArray(textureGroup) ? textureGroup : [textureGroup]) {
+            texture?.destroy();
+          }
+        }
+        app.resources.uniformBuffer?.destroy();
+      }
+      app.resources = null;
+      app.available = false;
+      app.adapter = null;
+      app.device = null;
+      app.context = null;
+      app.canvasFormat = null;
+    }
+
+    function createSimulationTexture(device, label, format) {
+      return device.createTexture({
+        label,
+        size: [GRID_WIDTH, GRID_HEIGHT, 1],
+        dimension: "2d",
+        format,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST
+      });
+    }
+
+    function createTextureViews(textures) {
+      return {
+        velocity: textures.velocity.map((texture) => texture.createView({ label: `${texture.label} view` })),
+        density: textures.density.map((texture) => texture.createView({ label: `${texture.label} view` })),
+        pressure: textures.pressure.map((texture) => texture.createView({ label: `${texture.label} view` })),
+        divergence: textures.divergence.createView({ label: "Divergence view" })
+      };
+    }
+
+    function createBindGroupLayouts(device) {
+      const computeVisibility = GPUShaderStage.COMPUTE;
+      const splat = device.createBindGroupLayout({
+        label: "Splat bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rg32float", viewDimension: "2d" } },
+          { binding: 4, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rgba16float", viewDimension: "2d" } }
+        ]
+      });
+      const advection = device.createBindGroupLayout({
+        label: "Advection bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rg32float", viewDimension: "2d" } },
+          { binding: 4, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rgba16float", viewDimension: "2d" } }
+        ]
+      });
+      const divergence = device.createBindGroupLayout({
+        label: "Divergence bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, storageTexture: { access: "write-only", format: "r32float", viewDimension: "2d" } }
+        ]
+      });
+      const pressure = device.createBindGroupLayout({
+        label: "Pressure bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "r32float", viewDimension: "2d" } }
+        ]
+      });
+      const gradient = device.createBindGroupLayout({
+        label: "Pressure gradient bind group layout",
+        entries: [
+          { binding: 0, visibility: computeVisibility, buffer: { type: "uniform" } },
+          { binding: 1, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: computeVisibility, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 3, visibility: computeVisibility, storageTexture: { access: "write-only", format: "rg32float", viewDimension: "2d" } }
+        ]
+      });
+      const render = device.createBindGroupLayout({
+        label: "Render bind group layout",
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
+        ]
+      });
+      return { splat, advection, divergence, pressure, gradient, render };
+    }
+
+    async function createShaderModule(device, code, label) {
+      const module = device.createShaderModule({ label, code });
+      if (typeof module.getCompilationInfo === "function") {
+        const compilationInfo = await module.getCompilationInfo();
+        const errors = compilationInfo.messages.filter((message) => message.type === "error");
+        if (errors.length > 0) {
+          const details = errors.map((error) => `${error.lineNum}:${error.linePos} ${error.message}`).join("; ");
+          throw new Error(`${label} compilation failed: ${details}`);
+        }
+      }
+      return module;
+    }
+
+    async function createPipelines(device, layouts) {
+      const [splatModule, advectionModule, divergenceModule, pressureModule, gradientModule, vertexModule, fragmentModule] = await Promise.all([
+        createShaderModule(device, splatShaderCode, "Splat shader"),
+        createShaderModule(device, advectionShaderCode, "Advection shader"),
+        createShaderModule(device, divergenceShaderCode, "Divergence shader"),
+        createShaderModule(device, pressureShaderCode, "Pressure shader"),
+        createShaderModule(device, gradientShaderCode, "Gradient shader"),
+        createShaderModule(device, renderVertexShaderCode, "Render vertex shader"),
+        createShaderModule(device, renderFragmentShaderCode, "Render fragment shader")
+      ]);
+
+      const createComputePipeline = (label, layout, module) => device.createComputePipeline({
+        label,
+        layout: device.createPipelineLayout({ label: `${label} pipeline layout`, bindGroupLayouts: [layout] }),
+        compute: { module, entryPoint: "main" }
+      });
+
+      return {
+        splat: createComputePipeline("Splat pipeline", layouts.splat, splatModule),
+        advection: createComputePipeline("Advection pipeline", layouts.advection, advectionModule),
+        divergence: createComputePipeline("Divergence pipeline", layouts.divergence, divergenceModule),
+        pressure: createComputePipeline("Pressure pipeline", layouts.pressure, pressureModule),
+        gradient: createComputePipeline("Pressure gradient pipeline", layouts.gradient, gradientModule),
+        render: device.createRenderPipeline({
+          label: "Density render pipeline",
+          layout: device.createPipelineLayout({ label: "Density render pipeline layout", bindGroupLayouts: [layouts.render] }),
+          vertex: { module: vertexModule, entryPoint: "main" },
+          fragment: { module: fragmentModule, entryPoint: "main", targets: [{ format: app.canvasFormat }] },
+          primitive: { topology: "triangle-list" }
+        })
+      };
+    }
+
+    function createSplatOrAdvectionBindGroups(device, layout, uniformBuffer, views, kind) {
+      return [0, 1].map((readIndex) => device.createBindGroup({
+        label: `${kind} bind group ${readIndex}`,
+        layout,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.velocity[readIndex] },
+          { binding: 2, resource: views.density[readIndex] },
+          { binding: 3, resource: views.velocity[1 - readIndex] },
+          { binding: 4, resource: views.density[1 - readIndex] }
+        ]
+      }));
+    }
+
+    function createBindGroups(device, layouts, uniformBuffer, views, sampler) {
+      const splat = createSplatOrAdvectionBindGroups(device, layouts.splat, uniformBuffer, views, "Splat");
+      const advection = createSplatOrAdvectionBindGroups(device, layouts.advection, uniformBuffer, views, "Advection");
+      const divergence = [0, 1].map((readIndex) => device.createBindGroup({
+        label: `Divergence bind group ${readIndex}`,
+        layout: layouts.divergence,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.velocity[readIndex] },
+          { binding: 2, resource: views.divergence }
+        ]
+      }));
+      const pressure = [0, 1].map((readIndex) => device.createBindGroup({
+        label: `Pressure bind group ${readIndex}`,
+        layout: layouts.pressure,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.pressure[readIndex] },
+          { binding: 2, resource: views.divergence },
+          { binding: 3, resource: views.pressure[1 - readIndex] }
+        ]
+      }));
+      const gradient = [0, 1].map((pressureIndex) => [0, 1].map((velocityIndex) => device.createBindGroup({
+        label: `Gradient bind group p${pressureIndex} v${velocityIndex}`,
+        layout: layouts.gradient,
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: views.pressure[pressureIndex] },
+          { binding: 2, resource: views.velocity[velocityIndex] },
+          { binding: 3, resource: views.velocity[1 - velocityIndex] }
+        ]
+      })));
+      const render = [0, 1].map((densityIndex) => device.createBindGroup({
+        label: `Render bind group ${densityIndex}`,
+        layout: layouts.render,
+        entries: [
+          { binding: 0, resource: views.density[densityIndex] },
+          { binding: 1, resource: sampler }
+        ]
+      }));
+      return { splat, advection, divergence, pressure, gradient, render };
+    }
+
+    async function createGpuResources(device) {
+      const uniformBuffer = device.createBuffer({
+        label: "Per-frame simulation uniforms",
+        size: UNIFORM_BUFFER_SIZE,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      const textures = {
+        velocity: [
+          createSimulationTexture(device, "Velocity ping-pong A", "rg32float"),
+          createSimulationTexture(device, "Velocity ping-pong B", "rg32float")
+        ],
+        density: [
+          createSimulationTexture(device, "Density ping-pong A", "rgba16float"),
+          createSimulationTexture(device, "Density ping-pong B", "rgba16float")
+        ],
+        pressure: [
+          createSimulationTexture(device, "Pressure ping-pong A", "r32float"),
+          createSimulationTexture(device, "Pressure ping-pong B", "r32float")
+        ],
+        divergence: createSimulationTexture(device, "Divergence", "r32float")
+      };
+      const views = createTextureViews(textures);
+      const sampler = device.createSampler({ label: "Linear presentation sampler", minFilter: "linear", magFilter: "linear" });
+      const layouts = createBindGroupLayouts(device);
+      const pipelines = await createPipelines(device, layouts);
+      const bindGroups = createBindGroups(device, layouts, uniformBuffer, views, sampler);
+      return { uniformBuffer, textures, views, sampler, layouts, pipelines, bindGroups, velocityIndex: 0, densityIndex: 0, pressureIndex: 0 };
+    }
+
+    function writeZeroTexture(texture, data, bytesPerRow) {
+      app.device.queue.writeTexture(
+        { texture },
+        data,
+        { bytesPerRow, rowsPerImage: GRID_HEIGHT },
+        { width: GRID_WIDTH, height: GRID_HEIGHT, depthOrArrayLayers: 1 }
+      );
+    }
+
+    function clearSimulationTextures() {
+      if (!app.device || !app.resources) {
+        return;
+      }
+      for (const texture of app.resources.textures.velocity) {
+        writeZeroTexture(texture, zeroTextureData.velocity, GRID_WIDTH * 8);
+      }
+      for (const texture of app.resources.textures.density) {
+        writeZeroTexture(texture, zeroTextureData.density, GRID_WIDTH * 8);
+      }
+      for (const texture of app.resources.textures.pressure) {
+        writeZeroTexture(texture, zeroTextureData.scalar, GRID_WIDTH * 4);
+      }
+      writeZeroTexture(app.resources.textures.divergence, zeroTextureData.scalar, GRID_WIDTH * 4);
+      app.resources.velocityIndex = 0;
+      app.resources.densityIndex = 0;
+      app.resources.pressureIndex = 0;
+      resetPointerState();
+      app.simulationTime = 0;
+      app.lastFrameTime = null;
+      app.fpsAccumulator = 0;
+      app.fpsFrames = 0;
+    }
+
+    function handleUncapturedError(event) {
+      const message = event.error?.message || "An uncaptured WebGPU validation error occurred.";
+      setGpuState("Validation warning", "warning");
+      setStatus(message, "warning");
+      console.error("WebGPU uncaptured error:", event.error);
+    }
+
+    function handleDeviceLost(device, info) {
+      if (app.device !== device) {
+        return;
+      }
+      stopAnimationLoop();
+      const reason = info?.message || info?.reason || "The GPU device was lost.";
+      destroyGpuResources();
+      setGpuControlsDisabled(true);
+      setGpuState("Device lost", "danger");
+      setStatus(`${reason} Use Retry GPU to rebuild the simulation.`, "danger");
+      retryGpuButton.hidden = false;
+      showCompatibility("GPU device lost", `${reason} The simulation can recover by requesting a fresh local GPU device.`);
+    }
+
+    async function initializeGpu() {
+      if (app.initializing) {
+        return;
+      }
+
+      app.initializing = true;
+      stopAnimationLoop();
+      destroyGpuResources();
+      setGpuControlsDisabled(true);
+      retryGpuButton.hidden = true;
+      setGpuState("Starting…", "warning");
+      setStatus("Requesting a high-performance local GPU…", "warning");
+
+      try {
+        if (!window.isSecureContext) {
+          throw new Error("WebGPU requires a secure context. Open this file through HTTPS or localhost.");
+        }
+        if (!navigator.gpu) {
+          throw new Error("This browser does not expose WebGPU. Use a current desktop Chrome or Edge release with WebGPU support.");
+        }
+
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }) || await navigator.gpu.requestAdapter();
+        if (!adapter) {
+          throw new Error("No compatible WebGPU adapter was found. Check that the browser and local GPU support WebGPU.");
+        }
+        const device = await adapter.requestDevice();
+        const context = canvas.getContext("webgpu");
+        if (!context) {
+          throw new Error("Could not acquire a WebGPU canvas context.");
+        }
+
+        app.adapter = adapter;
+        app.device = device;
+        app.context = context;
+        app.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+        device.onuncapturederror = handleUncapturedError;
+        device.lost.then((info) => handleDeviceLost(device, info)).catch((error) => console.error("Device-loss handler failed:", error));
+        app.resources = await createGpuResources(device);
+        configurePresentationCanvas();
+        clearSimulationTextures();
+        app.available = true;
+        app.paused = prefersReducedMotion;
+        hideCompatibility();
+        setGpuControlsDisabled(false);
+        setGpuState("Ready", "good");
+        setStatus(app.paused ? "Reduced-motion preference: paused. Press Resume or Space to begin." : "Drag anywhere on the canvas to inject ink and motion.", "good");
+        updatePauseButton();
+        if (app.paused) {
+          renderCurrentDensity();
+        } else {
+          startAnimationLoop();
+        }
+      } catch (error) {
+        console.error("WebGPU initialization failed:", error);
+        destroyGpuResources();
+        const message = error instanceof Error ? error.message : "Unknown WebGPU initialization failure.";
+        setGpuControlsDisabled(true);
+        setGpuState("Unavailable", "danger");
+        setStatus(message, "danger");
+        retryGpuButton.hidden = false;
+        showCompatibility("WebGPU is not ready", `${message} WebGPU generally requires a current browser and either HTTPS or localhost.`);
+      } finally {
+        app.initializing = false;
+      }
+    }
+
+    // 7. Texture and buffer creation is performed by createGpuResources above.
+    // 8. Pipeline and bind-group creation is performed before the first frame.
   </script>
 </body>
 </html>
