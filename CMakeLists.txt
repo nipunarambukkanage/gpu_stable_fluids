@@ -63,6 +63,7 @@ target_link_libraries(fluid_cuda PUBLIC CUDA::cudart)
 
 if(FLUID_BUILD_REFERENCE)
   add_library(fluid_reference STATIC
+    cuda/src/benchmark.cpp
     cuda/src/cpu_solver.cpp
     cuda/src/experiment_manifest.cpp
     cuda/src/native_runtime.cpp

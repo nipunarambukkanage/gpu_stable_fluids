@@ -4,6 +4,7 @@ const requiredFiles = [
   "CMakeLists.txt",
   "CMakePresets.json",
   "cuda/include/gpu_fluids/config.hpp",
+  "cuda/include/gpu_fluids/benchmark.hpp",
   "cuda/include/gpu_fluids/cuda_utils.hpp",
   "cuda/include/gpu_fluids/solver.hpp",
   "cuda/include/gpu_fluids/sph_solver.hpp",
@@ -18,6 +19,7 @@ const requiredFiles = [
   "cuda/include/gpu_fluids/telemetry.hpp",
   "cuda/include/gpu_fluids/trace_recorder.hpp",
   "cuda/src/main.cpp",
+  "cuda/src/benchmark.cpp",
   "cuda/src/solver.cu",
   "cuda/src/sph_solver.cu",
   "cuda/src/cpu_solver.cpp",
@@ -69,6 +71,7 @@ const telemetry = read("cuda/src/telemetry.cpp");
 const traceRecorder = read("cuda/src/trace_recorder.cpp");
 const referenceMain = read("cuda/src/reference_main.cpp");
 const config = read("cuda/include/gpu_fluids/config.hpp");
+const benchmark = read("cuda/src/benchmark.cpp");
 const cli = read("cuda/src/main.cpp");
 const cmakePresets = read("CMakePresets.json");
 
@@ -78,6 +81,8 @@ assert(cmake.includes("CUDA_SEPARABLE_COMPILATION ON"), "CMake must enable separ
 assert(cmake.includes("add_test(NAME native_config_contract"), "CMake must register the native configuration contract test");
 assert(cmakePresets.includes('"cuda-release"') && cmakePresets.includes('"CMAKE_CUDA_ARCHITECTURES"'), "CMake presets must define a reproducible CUDA release configuration");
 assert(config.includes("static_assert(sizeof(SimulationParams) == 112"), "host/device parameter layout must remain explicitly validated");
+assert(benchmark.includes("BenchmarkLedger::summarize") && benchmark.includes("p95Milliseconds"), "native benchmark ledger must compute summary latency statistics");
+assert(benchmark.includes("effectiveBandwidthGBPerSecond") && benchmark.includes("BenchmarkLedger::toJson"), "native benchmark ledger must report bandwidth and structured JSON");
 assert(config.includes("kMaxBacktraceDistance = 48.0F"), "native configuration must own the backtrace stability limit");
 assert(solver.includes("backtraceDisplacement") && solver.includes("hypotf"), "native advection must bound extreme backtrace displacement");
 assert(solver.includes("__global__ void divergenceKernel"), "native solver must contain a CUDA divergence kernel");
