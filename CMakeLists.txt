@@ -161,6 +161,13 @@ if(BUILD_TESTING AND FLUID_BUILD_TESTS)
     target_link_libraries(fluid_trace_recorder_contract PRIVATE fluid_reference)
     target_compile_features(fluid_trace_recorder_contract PRIVATE cxx_std_17)
     add_test(NAME native_trace_recorder_contract COMMAND fluid_trace_recorder_contract)
+
+    add_executable(fluid_benchmark_contract
+      tests/native/benchmark_contract.cpp
+    )
+    target_link_libraries(fluid_benchmark_contract PRIVATE fluid_reference)
+    target_compile_features(fluid_benchmark_contract PRIVATE cxx_std_17)
+    add_test(NAME native_benchmark_contract COMMAND fluid_benchmark_contract)
   endif()
 endif()
 

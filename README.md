@@ -30,6 +30,7 @@ GitHub automation runs the repository contracts and enforces that native C++/CUD
 - Local PNG snapshots generated from the presentation canvas; nothing is uploaded.
 - Optional asynchronous GPU timestamp sampling without a per-frame readback stall.
 - In-memory frame pacing and submission telemetry with a local diagnostics JSON export.
+- Native C++ benchmark ledger with p95 stage latency, transferred-byte accounting, effective bandwidth, and JSON output.
 - Runtime quality profiles with 8, 20, or 36 Jacobi iterations for explicit performance/quality trade-offs.
 - Hysteretic adaptive-quality governor that uses asynchronous GPU timestamps to change pressure work only after sustained budget pressure or headroom.
 - GPU diagnostic field views for density, velocity magnitude, signed pressure, divergence, and vorticity without changing the simulation graph.

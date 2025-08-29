@@ -39,6 +39,7 @@ const requiredFiles = [
   "tests/native/numeric_validation_contract.cpp",
   "tests/native/performance_model_contract.cpp",
   "tests/native/trace_recorder_contract.cpp",
+  "tests/native/benchmark_contract.cpp",
   "tests/native/config_contract.cpp",
   "docs/CUDA_NATIVE.md"
 ];
@@ -74,6 +75,7 @@ const config = read("cuda/include/gpu_fluids/config.hpp");
 const benchmark = read("cuda/src/benchmark.cpp");
 const cli = read("cuda/src/main.cpp");
 const cmakePresets = read("CMakePresets.json");
+const benchmarkContract = read("tests/native/benchmark_contract.cpp");
 
 assert(cmake.includes("project(gpu_stable_fluids_native LANGUAGES CXX CUDA)"), "CMake must enable native C++ and CUDA languages");
 assert(cmake.includes("find_package(CUDAToolkit REQUIRED)"), "CMake must link the CUDA toolkit explicitly");
@@ -125,6 +127,9 @@ assert(cli.includes("LaunchPolicySelector::select") && cli.includes("gpu-diagnos
 assert(performanceModel.includes("estimateCoalescedTransactions") && performanceModel.includes("estimateTileBytes"), "performance model must account for coalescing and shared-memory tiles");
 assert(performanceModel.includes("estimateStableFluidPipeline") && performanceModel.includes("dominantBottleneck"), "performance model must expose a stage-level pipeline estimate");
 assert(cmake.includes("cuda/src/numeric_validation.cpp"), "CMake must build the native numerical validation component");
+assert(cmake.includes("add_test(NAME native_benchmark_contract"), "CMake must register the native benchmark contract test");
+assert(benchmarkContract.includes("BenchmarkLedger") && benchmarkContract.includes("p95Milliseconds"), "native benchmark contract must exercise summary percentiles");
+assert(benchmarkContract.includes("effectiveBandwidthGBPerSecond") && benchmarkContract.includes("throwsInvalidArgument"), "native benchmark contract must exercise bandwidth and validation behavior");
 assert(read("cuda/src/numeric_validation.cpp").includes("ValidationReport::toJson"), "numeric validation must expose structured failure details");
 assert(manifest.includes("makeRuntimeManifest") && manifest.includes("ExperimentManifest::write"), "native runtime must emit a reproducibility manifest");
 assert(!new RegExp(forbiddenMarker, "i").test([cmake, solver, sphSolver, header, sphHeader, config, cli].join("\n")), "native CUDA source must remain unrelated to external integrations");
