@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a focused improvement to the simulation, tooling, or documentation.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What user or engineering problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed design
+      description: Describe the behavior, GPU/CPU ownership, and any compatibility concerns.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Explain how correctness and performance would be measured.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This proposal keeps the application dependency-free and local-first.
+          required: true
+        - label: This proposal does not require uploading simulation state or telemetry.
+          required: true

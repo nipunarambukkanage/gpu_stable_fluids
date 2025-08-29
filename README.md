@@ -1,8 +1,14 @@
 # Native CUDA C++ Stable Fluids Lab
 
+[![Quality](https://github.com/nipunarambukkanage/gpu_stable_fluids/actions/workflows/quality.yml/badge.svg)](https://github.com/nipunarambukkanage/gpu_stable_fluids/actions/workflows/quality.yml)
+[![Native CUDA](https://github.com/nipunarambukkanage/gpu_stable_fluids/actions/workflows/native-cuda.yml/badge.svg)](https://github.com/nipunarambukkanage/gpu_stable_fluids/actions/workflows/native-cuda.yml)
+[![CodeQL](https://github.com/nipunarambukkanage/gpu_stable_fluids/actions/workflows/codeql.yml/badge.svg)](https://github.com/nipunarambukkanage/gpu_stable_fluids/actions/workflows/codeql.yml)
+
 A native CUDA C++ implementation of an interactive 2D incompressible Stable Fluids solver. The CPU owns initialization, device selection, simulation control, and visualization coordination, while CUDA kernels parallelize cell and particle work on the GPU across a fixed 512 × 512 grid. A portable WebGPU preview remains available in the browser.
 
 The native path is organized as an industrial CMake project with persistent device allocations, coalesced row-major field access, shared-memory stencil tiles, stream-ordered asynchronous output, CUDA events, pinned host memory, and checked Runtime API calls. The browser path is a zero-dependency portability preview, not a substitute for the CUDA executable.
+
+GitHub automation runs the repository contracts and enforces that native C++/CUDA remains the majority of tracked implementation code. CodeQL, Dependabot, structured issue forms, and a GPU-aware pull-request checklist provide maintainable contribution guardrails. GitHub profile achievements still require genuine account activity—such as reviewed or merged pull requests, issues, discussions, and releases—and cannot be created honestly by a repository file alone.
 
 ## What is included
 
@@ -72,8 +78,13 @@ gpu_stable_fluids/
 │   ├── native/config_contract.cpp # Host/device layout and native constant contracts
 │   └── cuda-contract.mjs       # Native CUDA ownership and optimization contract checks
 ├── tools/
-│   └── serve.mjs               # Localhost static server with traversal protection
-├── .github/workflows/          # Automated JS quality and opt-in CUDA runner workflows
+│   ├── serve.mjs               # Localhost static server with traversal protection
+│   └── check-source-share.mjs  # Enforces the native-code majority contract
+├── .github/
+│   ├── workflows/              # Quality, CodeQL, and opt-in CUDA runner workflows
+│   ├── ISSUE_TEMPLATE/         # Reproducible bug and feature intake forms
+│   ├── dependabot.yml          # Monthly dependency maintenance configuration
+│   └── pull_request_template.md # GPU-aware review checklist
 ├── .clang-format               # Native C++/CUDA formatting policy
 ├── .editorconfig               # Cross-editor whitespace and encoding policy
 ├── .gitattributes               # Normalized text and binary asset handling

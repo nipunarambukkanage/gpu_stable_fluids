@@ -2,9 +2,21 @@ name: native-cuda
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cuda/**"
+      - "tests/native/**"
+      - ".github/workflows/native-cuda.yml"
 
 permissions:
   contents: read
+
+concurrency:
+  group: native-cuda-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cuda-release:
@@ -20,3 +32,14 @@ jobs:
         run: cmake --build --preset cuda-release
       - name: Run native tests
         run: ctest --preset cuda-release
+      - name: Export native smoke frame
+        run: .\build\cuda-release\gpu_stable_fluids_native.exe --frames 2 --output-dir build\ci-smoke
+      - name: Upload native diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-cuda-diagnostics
+          path: |
+            build/ci-smoke
+            build/cuda-release/*.json
+          if-no-files-found: ignore

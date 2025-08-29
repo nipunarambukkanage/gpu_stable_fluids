@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible browser, CUDA, or native-runtime problem.
+title: "bug: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include enough information to reproduce the issue without sharing private diagnostics.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: The pressure projection becomes unstable after changing quality.
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - Browser WebGPU preview
+        - Native CUDA solver
+        - C++ reference runtime
+        - Repository tooling or CI
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the scene, controls, and the smallest reproducible sequence.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste relevant local diagnostics, GPU model, browser/driver, and commit SHA. Remove secrets.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Preflight
+      options:
+        - label: I ran `npm run check` on the reported commit.
+          required: true
+        - label: I searched existing issues and did not find a duplicate.
+          required: true

@@ -5,7 +5,8 @@
   "description": "Native CUDA C++ stable fluids solver with a portable WebGPU preview",
   "type": "module",
   "scripts": {
-    "check": "node tests/static-contract.mjs && node tests/runtime-contract.mjs && node tests/cuda-contract.mjs",
+    "check": "node tests/static-contract.mjs && node tests/runtime-contract.mjs && node tests/cuda-contract.mjs && node tests/github-contract.mjs && node tools/check-source-share.mjs",
+    "check:source-share": "node tools/check-source-share.mjs",
     "serve": "node tools/serve.mjs"
   }
 }
