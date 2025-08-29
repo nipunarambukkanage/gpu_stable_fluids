@@ -116,6 +116,17 @@ Run the particle-based SPH pipeline:
 
 See docs/CUDA_NATIVE.md for the resource graph, kernel strategy, synchronization model, tuning guidance, and native validation boundary. This environment has no nvcc, so native compilation must be performed on a CUDA-capable development machine.
 
+### C++ reference runtime
+
+The native tree also contains a deterministic, dependency-free C++17 reference runtime. It is not a mock: it executes the same high-level stable-fluids stages—stroke injection, semi-Lagrangian advection, divergence, Jacobi pressure projection, vorticity confinement, boundary enforcement, and RGBA rendering—on standard C++ containers. This gives CI and development machines without an NVIDIA GPU a numerically meaningful execution path while the CUDA solver remains the production accelerator path.
+
+The reference runtime adds a command-driven orchestration boundary (`pause`, `resume`, `single-step`, `reset`, and `stop`), fixed-timestep validation, persistent solver state, deterministic frame generation, PPM export, and structured JSON/CSV stage telemetry with frame percentiles. Build and run it with:
+
+    cmake --build --preset cuda-release --target fluid_reference_demo
+    build/cuda-release/fluid_reference_demo --frames 120 --export-every 30
+
+The executable writes `runtime-report.json`, `experiment-manifest.json`, `telemetry.json`, `telemetry.csv`, `trace.json`, and selected reference frames to `artifacts/native-reference`. The trace is Chrome Trace Event compatible and can be opened in Perfetto or `chrome://tracing`. The manifest captures the fixed timestep, grid, solver budget, validation counters, and artifact list so a performance run can be reproduced. The C++ contract tests exercise solver finiteness, opaque frame output, stage timing, percentile aggregation, command ordering, reset semantics, validation reporting, manifest generation, and trace lifecycle behavior.
+
 ### Portable WebGPU preview
 
 WebGPU is normally available only in a secure context. From this directory, use the built-in dependency-free server:

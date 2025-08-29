@@ -1,4 +1,6 @@
 #include "gpu_fluids/config.hpp"
+#include "gpu_fluids/gpu_diagnostics.hpp"
+#include "gpu_fluids/launch_policy.hpp"
 #include "gpu_fluids/solver.hpp"
 #include "gpu_fluids/sph_solver.hpp"
 #include "gpu_fluids/visualization.hpp"
@@ -7,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -144,12 +147,30 @@ std::string formatMilliseconds(float milliseconds) {
   return value.str();
 }
 
+void writeDeviceReport(const std::filesystem::path& directory,
+                       const gpu_fluids::GpuDiagnostics& diagnostics,
+                       const gpu_fluids::LaunchPolicy& policy) {
+  std::ofstream output(directory / "gpu-diagnostics.json", std::ios::binary);
+  if (!output) {
+    throw std::runtime_error("Could not open GPU diagnostics output");
+  }
+  output << "{\"device\": " << diagnostics.toJson()
+         << ", \"launchPolicy\": " << gpu_fluids::LaunchPolicySelector::toJson(policy) << "}\n";
+  if (!output) {
+    throw std::runtime_error("Could not write GPU diagnostics output");
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     const CliOptions options = parseArguments(argc, argv);
     std::filesystem::create_directories(options.outputDirectory);
+    gpu_fluids::GpuDiagnostics diagnostics(options.deviceIndex);
+    const auto launchPolicy = gpu_fluids::LaunchPolicySelector::select(
+        diagnostics.snapshot(), options.pressureIterations, options.mode == "sph");
+    writeDeviceReport(options.outputDirectory, diagnostics, launchPolicy);
 
     if (options.mode == "sph") {
       gpu_fluids::SphSolver solver({}, options.deviceIndex);
@@ -160,6 +181,7 @@ int main(int argc, char** argv) {
                   << metrics.computeCapabilityMinor << ")\n"
                   << "  particles: " << gpu_fluids::kSphParticleCount
                   << ", uniform grid: " << gpu_fluids::kSphGridWidth << " x " << gpu_fluids::kSphGridHeight << "\n"
+                  << "  launch policy: " << launchPolicy.particleBlockThreads << " threads/block\n"
                   << "  persistent device memory: " << solver.lastFrameStats().persistentDeviceBytes << " bytes\n";
       }
       std::vector<std::uint8_t> rgba(static_cast<std::size_t>(solver.width()) * solver.height() * 4);
@@ -182,7 +204,7 @@ int main(int argc, char** argv) {
     }
 
     gpu_fluids::SolverConfig config;
-    config.pressureIterations = options.pressureIterations;
+    config.pressureIterations = launchPolicy.pressureIterations;
     config.deviceIndex = options.deviceIndex;
     config.enableVorticity = options.enableVorticity;
     gpu_fluids::StableFluidSolver solver(config);
@@ -194,6 +216,8 @@ int main(int argc, char** argv) {
                 << metrics.computeCapabilityMinor << ")\n"
                 << "  grid: " << solver.width() << " x " << solver.height()
                 << ", block: " << gpu_fluids::kBlockSize << " x " << gpu_fluids::kBlockSize << "\n"
+                << "  selected stencil threads: " << launchPolicy.stencilBlockThreads
+                << ", shared tiling: " << (launchPolicy.useSharedMemoryTiling ? "on" : "off") << "\n"
                 << "  persistent device memory: " << solver.lastFrameStats().persistentDeviceBytes << " bytes\n"
                 << "  divergence registers/thread: " << metrics.divergenceRegistersPerThread << "\n";
     }
