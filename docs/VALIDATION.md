@@ -59,7 +59,7 @@ Confirm that the SPH run reports the uniform neighbor-grid dimensions and a neig
 1. Start a free local static server, for example `python -m http.server 8000`.
 2. Open `http://localhost:8000/fluid-simulation.html` in a current desktop Chrome or Edge build with WebGPU.
 3. Confirm the status panel reaches `Ready`.
-4. Confirm resolution is `512 × 512`, pressure is `20 iterations`, and FPS becomes populated.
+4. Confirm resolution is `512 × 512`, pressure is `20 iterations` in the default Balanced profile, and FPS becomes populated.
 5. If the adapter exposes timestamp queries, confirm `GPU frame` eventually shows a millisecond value; otherwise it should report `Not exposed` without affecting simulation startup.
 6. Drag slowly and quickly across the canvas. Strokes should be continuous and directionally aligned.
 7. Hold the pointer still. Ink should continue without a large new velocity impulse.
@@ -71,10 +71,12 @@ Confirm that the SPH run reports the uniform neighbor-grid dimensions and a neig
 13. Clear. The field should become empty, simulation time should reset to `0.0 s`, and pointer history should be cleared.
 14. Use `Save PNG` and confirm a local PNG download is generated.
 15. Use `Save diagnostics JSON` and confirm the downloaded report contains a schema version, active settings, adapter limits, submission count, and local frame/GPU metrics.
-16. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
-17. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
-18. Hide and show the document, then resume. No large burst or instability should appear after returning.
-19. Inspect the browser console. Normal operation should produce no WebGPU validation error.
+16. Change the quality profile through Performance, Balanced, and Cinematic. The pressure status and HUD should report 8, 20, and 36 iterations without rebuilding GPU resources.
+17. Enable the Performance HUD and confirm its CPU, GPU, submission, pressure, tracer, adapter, and feature-tier values update while simulation continues.
+18. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
+19. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
+20. Hide and show the document, then resume. No large burst or instability should appear after returning.
+21. Inspect the browser console. Normal operation should produce no WebGPU validation error.
 
 ## Resource and shader review
 
@@ -94,7 +96,7 @@ The tracer smoke test should also show the GPU draw status as Indirect when enab
 - `rg32float` velocity, `rgba16float` density, `r32float` pressure, divergence, and vorticity formats match their bind-group layouts.
 - Storage destinations are never the sampled source in the same pass.
 - The uniform buffer is 112 bytes and each WGSL `vec4<f32>` slot is 16-byte aligned.
-- The pressure loop runs exactly 20 iterations and uses the tracked final index.
+- The pressure loop runs the selected profile count (8, 20, or 36) and uses the tracked final index.
 - Reset zeros both sides of every ping-pong field plus divergence and vorticity.
 - Canvas resizing only reconfigures presentation; it never recreates simulation textures.
 

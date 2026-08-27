@@ -14,7 +14,10 @@
     "maxBacktraceDistance": 48,
     "tracerCount": 8192,
     "workgroup": [16, 16, 1],
-    "settings": {},
+    "settings": {
+      "qualityProfile": "balanced",
+      "pressureIterations": 20
+    },
     "tracersEnabled": true
   },
   "capabilities": {

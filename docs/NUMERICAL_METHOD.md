@@ -92,13 +92,13 @@ At solid boundaries, a sampled outside velocity mirrors the relevant normal comp
 
 ## 5. Jacobi pressure solve
 
-The pressure field is warm-started from the previous frame. Each of exactly 20 iterations reads one pressure texture and writes the other:
+The pressure field is warm-started from the previous frame. Each configured iteration (20 in the default browser profile and native configuration) reads one pressure texture and writes the other:
 
 ```text
 pNew = 0.25 × (pLeft + pRight + pTop + pBottom - div)
 ```
 
-Pressure outside the domain is treated as the current edge pressure, which is a Neumann-like boundary behavior. The pressure index is swapped after every iteration. Because 20 is even, the final side has the same parity as the starting side, but the code uses the tracked index rather than relying on that fact.
+Pressure outside the domain is treated as the current edge pressure, which is a Neumann-like boundary behavior. The pressure index is swapped after every iteration. The code uses the tracked index rather than relying on iteration-count parity, which keeps the Performance and Cinematic browser profiles correct as well.
 
 ## 6. Projection
 
