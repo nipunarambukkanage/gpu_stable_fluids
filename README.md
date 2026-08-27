@@ -16,7 +16,7 @@ The native path is organized as an industrial CMake project with persistent devi
 - 8,192 GPU-resident Lagrangian tracer particles with storage-buffer ping-pong and instanced rendering.
 - GPU-generated indirect tracer draw arguments, keeping overlay command data in device-local storage.
 - Semi-Lagrangian advection with manual bilinear interpolation for `rg32float` velocity textures.
-- Incompressible projection using centered divergence, exactly 20 Jacobi pressure iterations, and pressure-gradient subtraction.
+- Incompressible projection using centered divergence, a selectable 8/20/36 Jacobi pressure workload (20 by default), and pressure-gradient subtraction.
 - Continuous pointer strokes using Pointer Events, pointer capture, coalesced events, pressure-safe timing, and a segment-distance splat falloff.
 - Optional vorticity confinement for richer curls without changing the default solver path.
 - Preset scenes for studio, soft ink, long trails, and turbulent ribbon looks.
@@ -24,6 +24,8 @@ The native path is organized as an industrial CMake project with persistent devi
 - Local PNG snapshots generated from the presentation canvas; nothing is uploaded.
 - Optional asynchronous GPU timestamp sampling without a per-frame readback stall.
 - In-memory frame pacing and submission telemetry with a local diagnostics JSON export.
+- Runtime quality profiles with 8, 20, or 36 Jacobi iterations for explicit performance/quality trade-offs.
+- Optional live performance HUD component backed by aggregated CPU/GPU signals, never by per-frame readback.
 - Bounded semi-Lagrangian backtracing in both browser WGSL and native CUDA paths for high-velocity resilience.
 - Pause/resume, clear/reset, hidden controls, responsive sizing, high-DPI support, visibility-aware timing, and device-loss recovery.
 - Accessible labels, keyboard shortcuts, visible focus states, readable status reporting, and reduced-motion startup behavior.
@@ -47,8 +49,10 @@ gpu_stable_fluids/
 │   │   ├── shaders.js           # WGSL compute/render source catalog
 │   │   ├── telemetry.js         # Local frame pacing and GPU sample aggregation
 │   │   └── timestamp-profiler.js # Optional asynchronous timestamp-query profiler
-│   └── runtime/
-│       └── diagnostics.js       # Versioned, local diagnostics report schema
+│   ├── runtime/
+│   │   └── diagnostics.js       # Versioned, local diagnostics report schema
+│   └── ui/
+│       └── performance-hud.js   # Reusable live telemetry HUD component
 ├── cuda/
 │   ├── include/gpu_fluids/     # Native solver, configuration, diagnostics, and output APIs
 │   └── src/                    # CUDA kernels plus CPU command-line visualization driver
@@ -165,6 +169,8 @@ The application does not provide a WebGL fallback. This is intentional: the nume
 | Auto demo | Runs a local procedural figure-eight stroke. Dragging takes control back. |
 | Save PNG | Saves the visible canvas locally as a PNG file. |
 | Save diagnostics JSON | Saves a local, versioned report containing settings, adapter limits, feature flags, frame pacing, submissions, and asynchronous GPU samples. |
+| Quality profile | Selects Performance (8), Balanced (20), or Cinematic (36) Jacobi pressure iterations at runtime. |
+| Performance HUD | Shows live CPU encode, asynchronous GPU sample, submission, pressure, tracer, and adapter data over the canvas. |
 
 Keyboard shortcuts:
 
@@ -203,7 +209,7 @@ uniform upload
   → velocity/density swap
   → optional vorticity + confinement
   → divergence
-  → 20 Jacobi pressure passes
+  → selected Jacobi pressure passes (8 / 20 / 36)
   → pressure-gradient subtraction
   → velocity swap
   → GPU-generated tracer draw arguments

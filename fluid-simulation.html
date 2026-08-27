@@ -12,6 +12,18 @@
   <main class="app-shell">
     <section class="stage" aria-label="Interactive WebGPU fluid simulation">
       <canvas id="fluidCanvas" tabindex="0" aria-label="Fluid simulation canvas. Drag to inject ink and velocity."></canvas>
+      <section id="performanceHud" class="performance-hud" hidden aria-label="Live GPU performance HUD">
+        <div class="hud-heading"><span>GPU telemetry</span><span data-hud-field="tier">baseline</span></div>
+        <div class="hud-grid">
+          <div><span>Frame</span><strong data-hud-field="fps">— FPS</strong></div>
+          <div><span>CPU encode</span><strong data-hud-field="cpu">—</strong></div>
+          <div><span>GPU sample</span><strong data-hud-field="gpu">—</strong></div>
+          <div><span>Submissions</span><strong data-hud-field="submissions">0</strong></div>
+          <div><span>Pressure</span><strong data-hud-field="pressure">20 Jacobi</strong></div>
+          <div><span>Tracers</span><strong data-hud-field="tracers">8,192 particles</strong></div>
+        </div>
+        <div class="hud-footer"><span>Adapter</span><strong data-hud-field="adapter">Detecting…</strong></div>
+      </section>
       <aside id="compatibilityCard" class="compatibility-card" hidden aria-live="assertive">
         <h1>WebGPU is not ready</h1>
         <p id="compatibilityMessage">This simulation needs a current Chromium-based browser with WebGPU enabled. WebGPU generally requires HTTPS or localhost.</p>
@@ -90,6 +102,14 @@
       <fieldset class="control-group">
         <legend>Lab tools</legend>
         <div class="field">
+          <label class="field-label" for="qualityProfile"><span>Quality profile</span><output id="qualityProfileValue">Balanced</output></label>
+          <select id="qualityProfile" aria-describedby="qualityProfileValue">
+            <option value="performance">Performance · 8 Jacobi</option>
+            <option value="balanced" selected>Balanced · 20 Jacobi</option>
+            <option value="cinematic">Cinematic · 36 Jacobi</option>
+          </select>
+        </div>
+        <div class="field">
           <label class="field-label" for="scenePreset"><span>Scene preset</span><output id="scenePresetValue">Studio</output></label>
           <select id="scenePreset" aria-describedby="scenePresetValue">
             <option value="studio">Studio</option>
@@ -103,6 +123,7 @@
           <input id="vorticityForce" type="range" min="0" max="1.5" step="0.05" value="0" aria-describedby="vorticityForceValue">
         </div>
         <label class="check-field" for="tracerToggle"><span>GPU tracer particles</span><input id="tracerToggle" type="checkbox" checked></label>
+        <label class="check-field" for="hudToggle"><span>Performance HUD</span><input id="hudToggle" type="checkbox"></label>
       </fieldset>
 
       <div class="button-row">

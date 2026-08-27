@@ -55,7 +55,7 @@ The local-memory footprints are small and explicit:
 
 Each invocation first stages its core cell. Boundary invocations additionally stage the halo cells, with mirrored edge values where the simulation domain ends. All invocations reach `workgroupBarrier()` before the stencil reads the tile. The final bounds check prevents stores outside the 512 × 512 domain, including any future partial dispatch.
 
-This is the WebGPU analogue of a shared-memory CUDA stencil. Workgroup memory is local to one workgroup and is not persistent between passes, so the halo is intentionally reloaded for every divergence, pressure, or vorticity dispatch. The pressure solver still uses 20 Jacobi passes and ping-pongs its pressure textures; tiling changes memory locality, not the algorithm’s synchronization boundary.
+This is the WebGPU analogue of a shared-memory CUDA stencil. Workgroup memory is local to one workgroup and is not persistent between passes, so the halo is intentionally reloaded for every divergence, pressure, or vorticity dispatch. The pressure solver uses the selected 8, 20, or 36 Jacobi passes in the browser (20 in the native default) and ping-pongs its pressure textures; tiling changes memory locality, not the algorithm’s synchronization boundary.
 
 The browser and native paths also share a 48-texel semi-Lagrangian backtrace cap. This is a numerical guardrail rather than a synchronization optimization: it keeps extreme velocities from creating oversized interpolation excursions while leaving the GPU-resident pass ordering unchanged.
 
@@ -90,7 +90,7 @@ The included native CUDA backend uses the same numerical stages as the preview, 
 3. Replace `workgroupBarrier()` with `__syncthreads()` after cooperative core and halo loads.
 4. Launch a 32 × 32 grid of blocks, preserving the global bounds guard.
 5. Use CUDA events for elapsed-time measurements and a stream for ordered pass submission.
-6. Keep the 20 pressure iterations and explicit swaps, or use CUDA Graph capture after the sequence is stable.
+6. Keep the configured pressure iteration count and explicit swaps, or use CUDA Graph capture after the sequence is stable.
 7. Generate device-side draw or dispatch records for future particle compaction or culling, analogous to a CUDA work queue or graph-produced launch parameters.
 8. Add cuFFT only for a deliberately different pressure solver; it is not required by this Jacobi method.
 

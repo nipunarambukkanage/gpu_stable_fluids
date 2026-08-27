@@ -60,7 +60,7 @@ No simulation texture is sampled and storage-written in the same pass. The JavaS
 
 ## Frame coordinator
 
-`encodeSimulationFrame()` performs one command encoder and one queue submission for a normal frame. The five base compute stages are always ordered as splat, advection, divergence, pressure, and gradient. When vorticity strength is non-zero, curl and confinement are inserted between advection and divergence. When tracers are enabled, a 64-thread particle advection dispatch runs after the final projected velocity is available and before the render pass. The pressure loop encodes exactly 20 separate compute passes in the same command encoder.
+`encodeSimulationFrame()` performs one command encoder and one queue submission for a normal frame. The five base compute stages are always ordered as splat, advection, divergence, pressure, and gradient. When vorticity strength is non-zero, curl and confinement are inserted between advection and divergence. When tracers are enabled, a 64-thread particle advection dispatch runs after the final projected velocity is available and before the render pass. The pressure loop encodes the selected 8, 20, or 36 Jacobi passes in the same command encoder.
 
 The loop does not map buffers, read textures back to the CPU, wait for GPU completion, or create pipelines/bind groups. Only the per-frame uniform upload and transient encoder/pass descriptors occur in the hot path. On adapters exposing `timestamp-query`, one sampled frame every 30 iterations adds two timestamp writes and an asynchronous readback request; all other frames remain unchanged.
 
@@ -71,6 +71,8 @@ The runtime telemetry module records only local counters: submitted command buff
 The report shape is documented in [DIAGNOSTICS_SCHEMA.md](DIAGNOSTICS_SCHEMA.md). Keeping the schema builder and its contract test separate from the UI prevents a future dashboard or native tooling from depending on DOM structure.
 
 Shader modules are compiled in parallel, and the pipeline factory requests asynchronous compute/render pipeline creation when the implementation exposes it. Older browsers use the synchronous creation methods through the same interface, so capability compatibility does not leak into the simulation graph.
+
+The quality profile is a controlled workload governor, not a hidden adaptive loop: Performance, Balanced, and Cinematic map to 8, 20, and 36 Jacobi pressure passes. Changing the profile updates the next command graph without reallocating textures, pipelines, or bind groups. The optional HUD consumes only the aggregated telemetry snapshot and therefore has no effect on GPU ownership or synchronization.
 
 ## Tiled stencil execution
 
