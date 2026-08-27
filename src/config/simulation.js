@@ -8,6 +8,12 @@ export const WORKGROUP_SIZE = 16;
 export const WORKGROUPS_X = Math.ceil(GRID_WIDTH / WORKGROUP_SIZE);
 export const WORKGROUPS_Y = Math.ceil(GRID_HEIGHT / WORKGROUP_SIZE);
 export const PRESSURE_ITERATIONS = 20;
+export const QUALITY_PROFILES = Object.freeze({
+  performance: Object.freeze({ label: "Performance", pressureIterations: 8, description: "Lower pressure cost for high frame rates." }),
+  balanced: Object.freeze({ label: "Balanced", pressureIterations: PRESSURE_ITERATIONS, description: "Balanced pressure quality and GPU cost." }),
+  cinematic: Object.freeze({ label: "Cinematic", pressureIterations: 36, description: "Higher pressure quality for clean dense curls." })
+});
+export const DEFAULT_QUALITY_PROFILE = "balanced";
 export const MAX_FRAME_DELTA = 1 / 30;
 export const MAX_BACKTRACE_DISTANCE = 48;
 export const MAX_POINTER_VELOCITY = 1800;

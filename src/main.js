@@ -4,7 +4,8 @@ import {
   WORKGROUP_SIZE,
   WORKGROUPS_X,
   WORKGROUPS_Y,
-  PRESSURE_ITERATIONS,
+  QUALITY_PROFILES,
+  DEFAULT_QUALITY_PROFILE,
   MAX_FRAME_DELTA,
   MAX_BACKTRACE_DISTANCE,
   MAX_POINTER_VELOCITY,
@@ -26,6 +27,7 @@ import { createGpuPipelineBatch } from "./gpu/pipeline-factory.js";
 import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, resetRuntimeTelemetry, snapshotRuntimeTelemetry } from "./gpu/telemetry.js";
 import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
 import { createDiagnosticsReport } from "./runtime/diagnostics.js";
+import { createPerformanceHud } from "./ui/performance-hud.js";
 
 "use strict";
 
@@ -33,6 +35,8 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
     const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
     const canvas = document.getElementById("fluidCanvas");
+    const performanceHudRoot = document.getElementById("performanceHud");
+    const performanceHud = createPerformanceHud(performanceHudRoot);
     const controls = document.getElementById("controls");
     const panelToggle = document.getElementById("panelToggle");
     const hideControlsButton = document.getElementById("hideControlsButton");
@@ -77,6 +81,9 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
     const demoButton = document.getElementById("demoButton");
     const snapshotButton = document.getElementById("snapshotButton");
     const diagnosticsButton = document.getElementById("diagnosticsButton");
+    const qualityProfileInput = document.getElementById("qualityProfile");
+    const qualityProfileValue = document.getElementById("qualityProfileValue");
+    const hudToggle = document.getElementById("hudToggle");
 
     // Uniform layout: each vec4 occupies one 16-byte slot.
     // 0..3: time, delta time, velocity dissipation, ink dissipation.
@@ -94,7 +101,9 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       velocityDissipation: 0.08,
       inkDissipation: 0.025,
       vorticityConfinement: 0,
-      exposure: 0.72
+      exposure: 0.72,
+      qualityProfile: DEFAULT_QUALITY_PROFILE,
+      pressureIterations: QUALITY_PROFILES[DEFAULT_QUALITY_PROFILE].pressureIterations
     };
     const zeroTextureData = {
       velocity: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
@@ -205,6 +214,8 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       demoButton.disabled = disabled;
       snapshotButton.disabled = disabled;
       diagnosticsButton.disabled = disabled;
+      qualityProfileInput.disabled = disabled;
+      hudToggle.disabled = disabled;
       canvas.style.cursor = disabled ? "not-allowed" : "crosshair";
       updatePauseButton();
     }
@@ -250,6 +261,14 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       gpuSamplesStatus.title = telemetry.lastGpuMs === null
         ? "Optional timestamp-query samples have not completed yet."
         : `Last GPU frame: ${telemetry.lastGpuMs.toFixed(2)} ms; EMA: ${telemetry.averageGpuMs.toFixed(2)} ms.`;
+      performanceHud.update({
+        fps: fpsStatus.textContent,
+        telemetry,
+        pressureIterations: simulationSettings.pressureIterations,
+        particleCount: PARTICLE_COUNT,
+        adapter: gpuAdapterStatus.textContent,
+        featureTier: app.capabilities?.featureTier || "baseline"
+      });
     }
 
     function destroyGpuResources() {
@@ -971,7 +990,7 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       encodeComputePass(commandEncoder, resources.pipelines.divergence, resources.bindGroups.divergence[resources.velocityIndex], "Divergence pass");
 
       // Each Jacobi iteration is its own compute pass so the read/write usage scope is distinct.
-      for (let iteration = 0; iteration < PRESSURE_ITERATIONS; iteration += 1) {
+      for (let iteration = 0; iteration < simulationSettings.pressureIterations; iteration += 1) {
         encodeComputePass(commandEncoder, resources.pipelines.pressure, resources.bindGroups.pressure[resources.pressureIndex], "Pressure Jacobi iteration");
         resources.pressureIndex = 1 - resources.pressureIndex;
       }
@@ -1057,6 +1076,7 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       app.interfaceAccumulator += deltaTime;
       if (app.interfaceAccumulator >= 0.25) {
         simulationTimeStatus.textContent = `${app.simulationTime.toFixed(1)} s`;
+        updateTelemetryReadouts();
         app.interfaceAccumulator = 0;
       }
       if (app.fpsAccumulator >= 0.5) {
@@ -1250,6 +1270,9 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       simulationSettings.velocityDissipation = Number.parseFloat(velocityDissipationInput.value);
       simulationSettings.inkDissipation = Number.parseFloat(inkDissipationInput.value);
       simulationSettings.vorticityConfinement = Number.parseFloat(vorticityForceInput.value);
+      const selectedProfile = QUALITY_PROFILES[qualityProfileInput.value] || QUALITY_PROFILES[DEFAULT_QUALITY_PROFILE];
+      simulationSettings.qualityProfile = QUALITY_PROFILES[qualityProfileInput.value] ? qualityProfileInput.value : DEFAULT_QUALITY_PROFILE;
+      simulationSettings.pressureIterations = selectedProfile.pressureIterations;
       refreshInkColorComponents();
       const selectedColor = inkColorInput.value.toLowerCase();
       for (const presetButton of colorPresetButtons) {
@@ -1264,6 +1287,10 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       vorticityForceValue.textContent = simulationSettings.vorticityConfinement > 0 ? `${simulationSettings.vorticityConfinement.toFixed(2)}×` : "Off";
       vorticityStatus.textContent = simulationSettings.vorticityConfinement > 0 ? `${simulationSettings.vorticityConfinement.toFixed(2)}×` : "Off";
       scenePresetValue.textContent = scenePresetInput.options[scenePresetInput.selectedIndex].textContent;
+      qualityProfileInput.value = simulationSettings.qualityProfile;
+      qualityProfileValue.textContent = selectedProfile.label;
+      qualityProfileInput.title = selectedProfile.description;
+      pressureStatus.textContent = `${simulationSettings.pressureIterations} iterations`;
     }
 
     function updateTracerState() {
@@ -1276,6 +1303,11 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       tracerStatus.title = app.particlesEnabled
         ? `${PARTICLE_COUNT.toLocaleString()} GPU-resident Lagrangian tracers are advected in a dedicated compute pass.`
         : "GPU tracer compute and rendering are disabled.";
+    }
+
+    function updateHudState() {
+      performanceHud.setVisible(hudToggle.checked);
+      updateTelemetryReadouts();
     }
 
     function selectInkPreset(event) {
@@ -1390,7 +1422,7 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
       }
       const report = createDiagnosticsReport({
         grid: [GRID_WIDTH, GRID_HEIGHT],
-        pressureIterations: PRESSURE_ITERATIONS,
+        pressureIterations: simulationSettings.pressureIterations,
         maxBacktraceDistance: MAX_BACKTRACE_DISTANCE,
         tracerCount: PARTICLE_COUNT,
         workgroup: [WORKGROUP_SIZE, WORKGROUP_SIZE, 1],
@@ -1523,11 +1555,14 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
     function setupInteractionAndUi() {
       updateControlReadouts();
       updateTracerState();
+      updateHudState();
       for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput, vorticityForceInput]) {
         input.addEventListener("input", updateControlReadouts);
       }
       scenePresetInput.addEventListener("change", applyScenePreset);
+      qualityProfileInput.addEventListener("change", updateControlReadouts);
       tracerToggle.addEventListener("change", updateTracerState);
+      hudToggle.addEventListener("change", updateHudState);
       for (const presetButton of colorPresetButtons) {
         presetButton.addEventListener("click", selectInkPreset);
       }
@@ -1557,7 +1592,7 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
     // 14. Startup
     setupInteractionAndUi();
     resolutionStatus.textContent = `${GRID_WIDTH} × ${GRID_HEIGHT}`;
-    pressureStatus.textContent = `${PRESSURE_ITERATIONS} iterations`;
+    pressureStatus.textContent = `${simulationSettings.pressureIterations} iterations`;
     updatePauseButton();
     setGpuControlsDisabled(true);
     initializeGpu();
