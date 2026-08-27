@@ -90,7 +90,7 @@ The cell kernels launch a 32 by 32 grid of 16 by 16 blocks over the fixed 512 by
 
 The divergence, pressure Jacobi, vorticity, confinement, and pressure-gradient kernels cooperatively stage an 18 by 18 core-plus-halo tile in shared memory. Threads load the interior and edge halo, synchronize with __syncthreads(), and then reuse neighboring values from the tile. This reduces repeated global-memory transactions for the stencil stages.
 
-Advection is inherently less regular because backtraced coordinates are data-dependent. It still writes contiguous output cells and uses manual bilinear sampling with clamped coordinates. Particle advection uses one 128-thread CUDA thread block per contiguous particle range, with one thread owning one particle record.
+Advection is inherently less regular because backtraced coordinates are data-dependent. It still writes contiguous output cells and uses manual bilinear sampling with clamped coordinates. The backtrace displacement is bounded to 48 texels, limiting pathological interpolation footprints after extreme impulses or long frame gaps. Particle advection uses one 128-thread CUDA thread block per contiguous particle range, with one thread owning one particle record.
 
 The render kernel converts the final density field to an RGBA frame on the GPU. The CPU only receives the finished presentation buffer when visualization requests it; it never receives the simulation field or particle positions during stepping.
 

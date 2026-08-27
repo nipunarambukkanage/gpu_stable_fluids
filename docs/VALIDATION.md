@@ -59,10 +59,11 @@ Confirm that the SPH run reports the uniform neighbor-grid dimensions and a neig
 12. Pause and resume. The field should freeze and resume without a time-step jump.
 13. Clear. The field should become empty, simulation time should reset to `0.0 s`, and pointer history should be cleared.
 14. Use `Save PNG` and confirm a local PNG download is generated.
-15. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
-16. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
-17. Hide and show the document, then resume. No large burst or instability should appear after returning.
-18. Inspect the browser console. Normal operation should produce no WebGPU validation error.
+15. Use `Save diagnostics JSON` and confirm the downloaded report contains a schema version, active settings, adapter limits, submission count, and local frame/GPU metrics.
+16. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
+17. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
+18. Hide and show the document, then resume. No large burst or instability should appear after returning.
+19. Inspect the browser console. Normal operation should produce no WebGPU validation error.
 
 ## Resource and shader review
 
@@ -73,6 +74,8 @@ The tracer smoke test should also show the GPU draw status as Indirect when enab
 - Divergence, pressure, and vorticity stage an 18 × 18 tile and synchronize with `workgroupBarrier()` before neighbor reads.
 - The adapter status reports `adapter.info` and the kernel status reports the workgroup shape plus the device invocation limit.
 - Optional timestamp buffers are created only after the adapter advertises `timestamp-query`; unsupported adapters stay on the unsynchronized path.
+- Local telemetry aggregation never maps a GPU buffer and does not add a queue wait to the animation loop; only the optional timestamp profiler schedules an asynchronous small readback.
+- Semi-Lagrangian backtraces are bounded to 48 texels in both the WGSL and CUDA implementations.
 - Tracer buffers use `STORAGE | COPY_DST`, are initialized identically, and swap only after the tracer compute pass.
 - The tracer compute dispatch uses 64-thread workgroups and exactly `ceil(8192 / 64)` workgroups.
 - The tracer overlay uses instanced rendering and additive blending without a CPU particle readback.
