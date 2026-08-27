@@ -400,7 +400,14 @@
       top: clamp(0.75rem, 2.4vw, 1.5rem);
       left: clamp(0.75rem, 2.4vw, 1.5rem);
       z-index: 2;
-      display: none;
+      display: block;
+    }
+
+    .diagnostics-button {
+      width: 100%;
+      margin-top: 0.55rem;
+      border-color: rgba(100, 216, 255, 0.25);
+      color: var(--accent-strong);
     }
 
     @media (max-width: 600px) {

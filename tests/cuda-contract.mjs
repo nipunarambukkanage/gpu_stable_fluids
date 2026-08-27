@@ -37,6 +37,8 @@ assert(cmake.includes("project(gpu_stable_fluids_native LANGUAGES CXX CUDA)"), "
 assert(cmake.includes("find_package(CUDAToolkit REQUIRED)"), "CMake must link the CUDA toolkit explicitly");
 assert(cmake.includes("CUDA_SEPARABLE_COMPILATION ON"), "CMake must enable separable CUDA compilation");
 assert(config.includes("static_assert(sizeof(SimulationParams) == 112"), "host/device parameter layout must remain explicitly validated");
+assert(config.includes("kMaxBacktraceDistance = 48.0F"), "native configuration must own the backtrace stability limit");
+assert(solver.includes("backtraceDisplacement") && solver.includes("hypotf"), "native advection must bound extreme backtrace displacement");
 assert(solver.includes("__global__ void divergenceKernel"), "native solver must contain a CUDA divergence kernel");
 assert(solver.includes("__shared__ float2 tile"), "neighbor stencils must use shared-memory tiles");
 assert((solver.match(/__syncthreads\(\)/g) || []).length >= 2, "shared-memory stencil stages must use block synchronization");

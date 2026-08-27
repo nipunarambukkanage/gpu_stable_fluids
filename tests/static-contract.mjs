@@ -7,11 +7,14 @@ const requiredFiles = [
   "src/main.js",
   "src/config/simulation.js",
   "src/gpu/timestamp-profiler.js",
+  "src/gpu/telemetry.js",
   "src/gpu/shaders.js",
   "docs/ARCHITECTURE.md",
   "docs/CUDA_TO_WEBGPU.md",
   "docs/NUMERICAL_METHOD.md",
   "docs/VALIDATION.md",
+  "docs/screenshots/webgpu-lab-mockup.png",
+  "docs/screenshots/cuda-sph-pipeline-mockup.png",
   "CONTRIBUTING.md",
   "tools/serve.mjs"
 ];
@@ -31,8 +34,10 @@ const html = read("fluid-simulation.html");
 const runtime = read("src/main.js");
 const config = read("src/config/simulation.js");
 const profiler = read("src/gpu/timestamp-profiler.js");
+const telemetry = read("src/gpu/telemetry.js");
 const shaders = read("src/gpu/shaders.js");
 const styles = read("styles/fluid-lab.css");
+const readme = read("README.md");
 
 assert(html.includes('<link rel="stylesheet" href="./styles/fluid-lab.css">'), "HTML shell must load the external stylesheet");
 assert(html.includes('<script type="module" src="./src/main.js"></script>'), "HTML shell must load the module entry point");
@@ -42,7 +47,13 @@ assert(runtime.includes('"./config/simulation.js"'), "main entry must import sha
 assert(runtime.includes('"./gpu/timestamp-profiler.js"'), "main entry must import the GPU profiler module");
 assert(runtime.includes('"./gpu/shaders.js"'), "main entry must import the GPU shader module");
 assert(config.includes("export const GRID_WIDTH = 512"), "simulation configuration must own the fixed grid size");
+assert(config.includes("export const MAX_BACKTRACE_DISTANCE = 48"), "simulation configuration must own the backtrace stability limit");
 assert(profiler.includes("timestamp-query"), "GPU profiler module must use optional timestamp-query");
+assert(telemetry.includes("snapshotRuntimeTelemetry"), "runtime telemetry must expose a serializable diagnostics snapshot");
+assert(html.includes("Save diagnostics JSON"), "UI must expose local diagnostics export");
+assert(runtime.includes("recordRuntimeSubmission"), "runtime must count submitted GPU command buffers");
+assert(readme.includes("docs/screenshots/webgpu-lab-mockup.png") && readme.includes("docs/screenshots/cuda-sph-pipeline-mockup.png"), "README must reference both repository visual assets");
+assert(readme.includes("Save diagnostics JSON"), "README must document the diagnostics export");
 assert(shaders.includes("export const particleComputeShaderCode"), "GPU shader module must own the tracer compute source");
 assert(shaders.includes("export const indirectArgsShaderCode"), "GPU shader module must own the indirect draw-arguments source");
 assert(styles.includes(":root"), "external stylesheet must contain the application design tokens");
@@ -51,9 +62,9 @@ assert((shaders.match(/workgroupBarrier\(\)/g) || []).length === 3, "tiled stenc
 assert(runtime.includes("PARTICLE_COUNT"), "runtime must retain GPU tracer workload configuration");
 assert(runtime.includes("GPUBufferUsage.INDIRECT"), "tracer draw arguments must use an indirect-capable GPU buffer");
 assert(runtime.includes("drawIndirect"), "tracer rendering must consume GPU-generated indirect arguments");
-assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${profiler}\n${shaders}`), "runtime must remain local and free of forbidden dependencies");
+assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${profiler}\n${telemetry}\n${shaders}`), "runtime must remain local and free of forbidden dependencies");
 
-for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/timestamp-profiler.js", "src/gpu/shaders.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
+for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/timestamp-profiler.js", "src/gpu/telemetry.js", "src/gpu/shaders.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", modulePath], { encoding: "utf8" });
   assert(result.status === 0, `${modulePath} failed Node syntax validation: ${result.stderr.trim()}`);
 }
