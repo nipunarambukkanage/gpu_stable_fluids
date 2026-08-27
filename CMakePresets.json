@@ -1,0 +1,39 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "cuda-release",
+      "displayName": "CUDA Release",
+      "description": "Release build with native CUDA tests and compile command export enabled.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cuda-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_ARCHITECTURES": "75",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "FLUID_BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "cuda-release",
+      "configurePreset": "cuda-release",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "cuda-release",
+      "configurePreset": "cuda-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
