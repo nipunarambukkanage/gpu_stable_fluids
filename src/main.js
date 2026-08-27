@@ -6,6 +6,7 @@ import {
   WORKGROUPS_Y,
   PRESSURE_ITERATIONS,
   MAX_FRAME_DELTA,
+  MAX_BACKTRACE_DISTANCE,
   MAX_POINTER_VELOCITY,
   MAX_DENSITY,
   MAX_EFFECTIVE_DPR,
@@ -20,7 +21,10 @@ import {
   createInitialParticleData
 } from "./config/simulation.js";
 import { createGpuTimer, destroyGpuTimer, readGpuTimestamp } from "./gpu/timestamp-profiler.js";
+import { formatCapabilityFailure, inspectWebGpuAdapter } from "./gpu/capabilities.js";
+import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, resetRuntimeTelemetry, snapshotRuntimeTelemetry } from "./gpu/telemetry.js";
 import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
+import { createDiagnosticsReport } from "./runtime/diagnostics.js";
 
 "use strict";
 
@@ -60,6 +64,9 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
     const velocityDissipationValue = document.getElementById("velocityDissipationValue");
     const inkDissipationValue = document.getElementById("inkDissipationValue");
     const simulationTimeStatus = document.getElementById("simulationTimeStatus");
+    const framePacingStatus = document.getElementById("framePacingStatus");
+    const submissionStatus = document.getElementById("submissionStatus");
+    const gpuSamplesStatus = document.getElementById("gpuSamplesStatus");
     const vorticityStatus = document.getElementById("vorticityStatus");
     const scenePresetInput = document.getElementById("scenePreset");
     const scenePresetValue = document.getElementById("scenePresetValue");
@@ -68,6 +75,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
     const tracerToggle = document.getElementById("tracerToggle");
     const demoButton = document.getElementById("demoButton");
     const snapshotButton = document.getElementById("snapshotButton");
+    const diagnosticsButton = document.getElementById("diagnosticsButton");
 
     // Uniform layout: each vec4 occupies one 16-byte slot.
     // 0..3: time, delta time, velocity dissipation, ink dissipation.
@@ -102,6 +110,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       resources: null,
       particlesEnabled: true,
       gpuTimer: null,
+      capabilities: null,
       available: false,
       initializing: false,
       paused: prefersReducedMotion,
@@ -113,6 +122,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       fpsAccumulator: 0,
       fpsFrames: 0,
       interfaceAccumulator: 0,
+      telemetry: createRuntimeTelemetry(performance.now()),
       resizeObserver: null,
       presentationWidth: 0,
       presentationHeight: 0,
@@ -193,6 +203,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       clearButton.disabled = disabled;
       demoButton.disabled = disabled;
       snapshotButton.disabled = disabled;
+      diagnosticsButton.disabled = disabled;
       canvas.style.cursor = disabled ? "not-allowed" : "crosshair";
       updatePauseButton();
     }
@@ -223,6 +234,21 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         : timestampFeatureAvailable
           ? "The adapter advertises timestamp-query, but the timer could not be created."
           : "This adapter does not expose the optional WebGPU timestamp-query feature.";
+      updateTelemetryReadouts();
+    }
+
+    function updateTelemetryReadouts() {
+      const telemetry = snapshotRuntimeTelemetry(app.telemetry, performance.now());
+      framePacingStatus.textContent = telemetry.frameCount > 0 ? `${telemetry.averageCpuEncodeMs.toFixed(2)} ms avg` : "Collecting…";
+      framePacingStatus.title = telemetry.frameCount > 0
+        ? `Last CPU encode: ${telemetry.lastCpuEncodeMs.toFixed(2)} ms; longest frame gap: ${telemetry.maximumFrameDeltaMs.toFixed(2)} ms.`
+        : "Measures CPU command encoding and submission cost, not GPU execution time.";
+      submissionStatus.textContent = `${telemetry.submittedFrames.toLocaleString()} queued`;
+      submissionStatus.title = `${telemetry.longFrames.toLocaleString()} long frame gaps detected; command buffers remain GPU-owned after submission.`;
+      gpuSamplesStatus.textContent = `${telemetry.gpuSamples.toLocaleString()} samples`;
+      gpuSamplesStatus.title = telemetry.lastGpuMs === null
+        ? "Optional timestamp-query samples have not completed yet."
+        : `Last GPU frame: ${telemetry.lastGpuMs.toFixed(2)} ms; EMA: ${telemetry.averageGpuMs.toFixed(2)} ms.`;
     }
 
     function destroyGpuResources() {
@@ -244,6 +270,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       app.resources = null;
       app.available = false;
       app.adapter = null;
+      app.capabilities = null;
       app.device = null;
       app.context = null;
       app.canvasFormat = null;
@@ -706,7 +733,9 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       app.fpsAccumulator = 0;
       app.fpsFrames = 0;
       app.interfaceAccumulator = 0;
+      resetRuntimeTelemetry(app.telemetry, performance.now());
       simulationTimeStatus.textContent = "0.0 s";
+      updateTelemetryReadouts();
     }
 
     function handleUncapturedError(event) {
@@ -736,6 +765,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       }
 
       app.initializing = true;
+      resetRuntimeTelemetry(app.telemetry, performance.now());
       stopAnimationLoop();
       destroyGpuResources();
       app.demo.active = false;
@@ -758,28 +788,18 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         if (!adapter) {
           throw new Error("No compatible WebGPU adapter was found. Check that the browser and local GPU support WebGPU.");
         }
-        const adapterLimits = adapter.limits || {};
-        const minimumTileThreads = WORKGROUP_SIZE * WORKGROUP_SIZE;
-        if ((adapterLimits.maxComputeInvocationsPerWorkgroup || 0) < minimumTileThreads || (adapterLimits.maxComputeWorkgroupSizeX || 0) < WORKGROUP_SIZE || (adapterLimits.maxComputeWorkgroupSizeY || 0) < WORKGROUP_SIZE) {
-          throw new Error(`This GPU does not support the required ${WORKGROUP_SIZE} × ${WORKGROUP_SIZE} fluid workgroup.`);
+        const capabilities = inspectWebGpuAdapter(adapter, { workgroupSize: WORKGROUP_SIZE, particleBufferSize: PARTICLE_BUFFER_SIZE });
+        if (!capabilities.supported) {
+          throw new Error(formatCapabilityFailure(capabilities));
         }
-        if ((adapterLimits.maxStorageBufferBindingSize || 0) < PARTICLE_BUFFER_SIZE) {
-          throw new Error("This GPU does not expose enough storage-buffer capacity for the tracer workload.");
-        }
-        const optionalFeatures = adapter.features?.has?.("timestamp-query") ? ["timestamp-query"] : [];
-        const requiredLimits = {
-          maxComputeInvocationsPerWorkgroup: minimumTileThreads,
-          maxComputeWorkgroupSizeX: WORKGROUP_SIZE,
-          maxComputeWorkgroupSizeY: WORKGROUP_SIZE,
-          maxStorageBufferBindingSize: PARTICLE_BUFFER_SIZE
-        };
-        const device = await adapter.requestDevice({ requiredFeatures: optionalFeatures, requiredLimits });
+        const device = await adapter.requestDevice({ requiredFeatures: capabilities.optionalFeatures, requiredLimits: capabilities.requiredLimits });
         const context = canvas.getContext("webgpu");
         if (!context) {
           throw new Error("Could not acquire a WebGPU canvas context.");
         }
 
         app.adapter = adapter;
+        app.capabilities = capabilities;
         app.device = device;
         app.context = context;
         app.canvasFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -1002,8 +1022,12 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         commandEncoder.copyBufferToBuffer(gpuTimer.resolveBuffer, 0, gpuTimer.readbackBuffer, 0, 16);
       }
       app.device.queue.submit([commandEncoder.finish()]);
+      recordRuntimeSubmission(app.telemetry);
       if (shouldSampleGpuTime) {
-        readGpuTimestamp(gpuTimer, app, gpuTimeStatus);
+        readGpuTimestamp(gpuTimer, app, gpuTimeStatus, (milliseconds) => {
+          recordGpuSample(app.telemetry, milliseconds);
+          updateTelemetryReadouts();
+        });
       }
     }
 
@@ -1063,7 +1087,10 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
         return;
       }
 
-      const rawDelta = app.lastFrameTime === null ? 1 / 60 : (timestamp - app.lastFrameTime) / 1000;
+      const frameStart = performance.now();
+      const measuredFrameDeltaMs = app.lastFrameTime === null ? 1000 / 60 : timestamp - app.lastFrameTime;
+      const frameDeltaMs = Number.isFinite(measuredFrameDeltaMs) ? Math.max(0, measuredFrameDeltaMs) : 1000 / 60;
+      const rawDelta = frameDeltaMs / 1000;
       const deltaTime = clampNumber(Number.isFinite(rawDelta) ? rawDelta : 1 / 60, 1 / 1000, MAX_FRAME_DELTA);
       app.lastFrameTime = timestamp;
       app.simulationTime += deltaTime;
@@ -1071,6 +1098,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
 
       try {
         encodeSimulationFrame(deltaTime);
+        recordRuntimeFrame(app.telemetry, frameDeltaMs, performance.now() - frameStart);
       } catch (error) {
         console.error("Simulation frame failed:", error);
         stopAnimationLoop();
@@ -1370,6 +1398,34 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       }, "image/png");
     }
 
+    function saveDiagnostics() {
+      if (!app.available || !app.adapter) {
+        return;
+      }
+      const report = createDiagnosticsReport({
+        grid: [GRID_WIDTH, GRID_HEIGHT],
+        pressureIterations: PRESSURE_ITERATIONS,
+        maxBacktraceDistance: MAX_BACKTRACE_DISTANCE,
+        tracerCount: PARTICLE_COUNT,
+        workgroup: [WORKGROUP_SIZE, WORKGROUP_SIZE, 1],
+        settings: simulationSettings,
+        tracersEnabled: app.particlesEnabled,
+        adapterInfo: app.adapter.info || {},
+        adapterLimits: app.adapter.limits || {},
+        capabilities: app.capabilities,
+        features: app.device ? Array.from(app.device.features || []) : [],
+        runtime: snapshotRuntimeTelemetry(app.telemetry, performance.now())
+      });
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `stable-fluids-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      setStatus("Diagnostics JSON saved locally.", "good");
+    }
+
     function togglePause() {
       if (!app.available) {
         return;
@@ -1493,6 +1549,7 @@ import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradi
       clearButton.addEventListener("click", clearSimulation);
       demoButton.addEventListener("click", toggleDemo);
       snapshotButton.addEventListener("click", saveSnapshot);
+      diagnosticsButton.addEventListener("click", saveDiagnostics);
       retryGpuButton.addEventListener("click", initializeGpu);
       hideControlsButton.addEventListener("click", () => setControlsVisible(false));
       panelToggle.addEventListener("click", () => setControlsVisible(true));
