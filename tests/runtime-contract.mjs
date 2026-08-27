@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { formatCapabilityFailure, inspectWebGpuAdapter } from "../src/gpu/capabilities.js";
+import { formatCapabilityFailure, inspectWebGpuAdapter, requestDeviceWithFallback } from "../src/gpu/capabilities.js";
+import { createGpuPipelineBatch } from "../src/gpu/pipeline-factory.js";
 import { createDiagnosticsReport, DIAGNOSTICS_SCHEMA_VERSION } from "../src/runtime/diagnostics.js";
 import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, snapshotRuntimeTelemetry } from "../src/gpu/telemetry.js";
 
@@ -19,6 +20,39 @@ assert.equal(capabilities.supported, true);
 assert.deepEqual(capabilities.optionalFeatures, ["timestamp-query"]);
 assert.equal(capabilities.requiredLimits.maxStorageBufferBindingSize, 1_000_000);
 
+let deviceRequests = 0;
+const fallbackSelection = await requestDeviceWithFallback({
+  requestDevice: async ({ requiredFeatures }) => {
+    deviceRequests += 1;
+    if (requiredFeatures.length > 0) {
+      throw new Error("optional timestamp feature rejected by test adapter");
+    }
+    return { id: "baseline-device" };
+  }
+}, capabilities);
+assert.equal(deviceRequests, 2);
+assert.equal(fallbackSelection.capabilities.featureTier, "baseline");
+
+const pipelineCalls = [];
+const pipelineDevice = {
+  createComputePipelineAsync: async (descriptor) => {
+    pipelineCalls.push(`async:${descriptor.label}`);
+    return { label: descriptor.label };
+  },
+  createRenderPipelineAsync: async (descriptor) => {
+    pipelineCalls.push(`async:${descriptor.label}`);
+    return { label: descriptor.label };
+  },
+  createComputePipeline: () => { throw new Error("synchronous fallback should not be selected"); },
+  createRenderPipeline: () => { throw new Error("synchronous fallback should not be selected"); }
+};
+const pipelines = await createGpuPipelineBatch(pipelineDevice, [
+  { kind: "compute", descriptor: { label: "compute-a" } },
+  { kind: "render", descriptor: { label: "render-a" } }
+]);
+assert.deepEqual(pipelineCalls, ["async:compute-a", "async:render-a"]);
+assert.deepEqual(pipelines.map((pipeline) => pipeline.label), ["compute-a", "render-a"]);
+
 const unsupportedAdapter = {
   limits: { maxComputeInvocationsPerWorkgroup: 64, maxComputeWorkgroupSizeX: 8, maxComputeWorkgroupSizeY: 8, maxStorageBufferBindingSize: 512 },
   features: new Set()
@@ -30,14 +64,17 @@ assert.match(formatCapabilityFailure(unsupported), /maxComputeInvocationsPerWork
 const telemetry = createRuntimeTelemetry(100);
 recordRuntimeFrame(telemetry, 16, 2);
 recordRuntimeFrame(telemetry, 50, 4);
+recordRuntimeFrame(telemetry, Number.NaN, Number.POSITIVE_INFINITY);
 recordRuntimeSubmission(telemetry);
 recordGpuSample(telemetry, 3.5);
 const runtime = snapshotRuntimeTelemetry(telemetry, 1_100);
-assert.equal(runtime.frameCount, 2);
+assert.equal(runtime.frameCount, 3);
 assert.equal(runtime.submittedFrames, 1);
 assert.equal(runtime.longFrames, 1);
 assert.equal(runtime.gpuSamples, 1);
 assert.equal(runtime.uptimeMs, 1_000);
+assert.equal(runtime.lastFrameDeltaMs, 0);
+assert.equal(runtime.lastCpuEncodeMs, 0);
 
 const report = createDiagnosticsReport({
   generatedAt: "2026-08-27T00:00:00.000Z",

@@ -32,7 +32,8 @@ The native path is organized as an industrial CMake project with persistent devi
 
 ```text
 gpu_stable_fluids/
-├── CMakeLists.txt             # Native CUDA/C++ build and architecture configuration
+├── CMakeLists.txt             # Native CUDA/C++ build, tests, and architecture configuration
+├── CMakePresets.json          # Reproducible CUDA configure/build/test presets
 ├── fluid-simulation.html       # Stable browser entry shell
 ├── package.json                # Dependency-free development commands
 ├── README.md                   # Project overview, usage, design decisions, and maintenance notes
@@ -40,10 +41,14 @@ gpu_stable_fluids/
 │   ├── main.js                 # Application coordinator, WebGPU graph, UI, and input
 │   ├── config/
 │   │   └── simulation.js       # Shared grid, workload, buffer, and particle constants
-│   └── gpu/
-│       ├── shaders.js           # WGSL compute/render source catalog
-│       ├── telemetry.js         # Local frame pacing and GPU sample aggregation
-│       └── timestamp-profiler.js # Optional asynchronous timestamp-query profiler
+│   ├── gpu/
+│   │   ├── capabilities.js      # Adapter limits and optional-feature policy
+│   │   ├── pipeline-factory.js  # Async pipeline compilation with compatibility fallback
+│   │   ├── shaders.js           # WGSL compute/render source catalog
+│   │   ├── telemetry.js         # Local frame pacing and GPU sample aggregation
+│   │   └── timestamp-profiler.js # Optional asynchronous timestamp-query profiler
+│   └── runtime/
+│       └── diagnostics.js       # Versioned, local diagnostics report schema
 ├── cuda/
 │   ├── include/gpu_fluids/     # Native solver, configuration, diagnostics, and output APIs
 │   └── src/                    # CUDA kernels plus CPU command-line visualization driver
@@ -51,15 +56,22 @@ gpu_stable_fluids/
 │   └── fluid-lab.css           # Design tokens, responsive layout, controls, and accessibility states
 ├── tests/
 │   ├── static-contract.mjs     # WebGPU repository and syntax contract checks
+│   ├── runtime-contract.mjs    # Capability, telemetry, and diagnostics unit contracts
+│   ├── native/config_contract.cpp # Host/device layout and native constant contracts
 │   └── cuda-contract.mjs       # Native CUDA ownership and optimization contract checks
 ├── tools/
 │   └── serve.mjs               # Localhost static server with traversal protection
+├── .github/workflows/          # Automated JS quality and opt-in CUDA runner workflows
+├── .clang-format               # Native C++/CUDA formatting policy
+├── .editorconfig               # Cross-editor whitespace and encoding policy
+├── .gitattributes               # Normalized text and binary asset handling
 ├── .gitignore                  # Local tooling/build output exclusions
 ├── CONTRIBUTING.md             # GPU change, validation, and branch hygiene practices
 └── docs/
     ├── ARCHITECTURE.md         # Runtime components, resource graph, lifecycle, and invariants
     ├── CUDA_NATIVE.md          # Native CUDA ownership, memory, streams, kernels, and build guide
     ├── CUDA_TO_WEBGPU.md       # CUDA concept mapping, tiled kernels, and portability boundaries
+    ├── DIAGNOSTICS_SCHEMA.md   # Versioned local diagnostics report contract
     ├── NUMERICAL_METHOD.md     # Stable Fluids equations, coordinate conventions, and GPU passes
     ├── VALIDATION.md            # Static checks, browser smoke tests, and regression checklist
     └── screenshots/             # Repository-bound visual documentation mockups
@@ -75,6 +87,12 @@ Install the NVIDIA CUDA Toolkit, nvcc, a C++17 compiler, and CMake 3.24 or newer
 
     cmake -S . -B build/cuda -DCMAKE_CUDA_ARCHITECTURES=86
     cmake --build build/cuda --config Release
+
+For a reproducible local build, use the checked-in preset (Ninja and the CUDA Toolkit are required):
+
+    cmake --preset cuda-release
+    cmake --build --preset cuda-release
+    ctest --preset cuda-release
 
 Run the CPU-controlled CUDA demo. It keeps the simulation on the GPU and exports presentation frames through pinned host memory:
 
@@ -111,6 +129,8 @@ No installation or dependency install is required by this project. Run the repos
 ```bash
 npm run check
 ```
+
+`npm run check` includes static WebGPU checks, deterministic capability/diagnostics contracts, and native CUDA source contracts. The repository also provides a GitHub Actions quality workflow plus an opt-in self-hosted CUDA workflow for machines tagged `windows,cuda`.
 
 Opening the HTML directly may work in some browsers, but `localhost` is the reliable option for WebGPU’s secure-context and ES-module requirements.
 

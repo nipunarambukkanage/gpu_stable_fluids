@@ -2,7 +2,7 @@
 
 The native CUDA C++ target under cuda/ is the primary high-performance execution path. The browser modules remain a portable WebGPU preview with a parallel resource graph, while the native solver owns CUDA Runtime API allocations, streams, events, shared-memory kernels, and CPU-coordinated frame export.
 
-The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; `src/gpu/telemetry.js` owns dependency-free local performance aggregation; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, diagnostics export, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
+The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/capabilities.js` owns adapter-limit and optional-feature policy; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; `src/gpu/telemetry.js` owns dependency-free local performance aggregation; `src/runtime/diagnostics.js` owns the versioned report schema; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, diagnostics export, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
 
 ## Runtime layers
 
@@ -68,6 +68,10 @@ When tracers are enabled, a one-invocation compute pass refreshes the indirect d
 
 The runtime telemetry module records only local counters: submitted command buffers, long-frame count, exponentially smoothed CPU encode time, and asynchronous GPU timestamp samples. It is intentionally separate from the simulation state and has no network or persistence side effect until the user explicitly selects `Save diagnostics JSON`. The export includes a schema version so future fields can be added without making existing reports ambiguous.
 
+The report shape is documented in [DIAGNOSTICS_SCHEMA.md](DIAGNOSTICS_SCHEMA.md). Keeping the schema builder and its contract test separate from the UI prevents a future dashboard or native tooling from depending on DOM structure.
+
+Shader modules are compiled in parallel, and the pipeline factory requests asynchronous compute/render pipeline creation when the implementation exposes it. Older browsers use the synchronous creation methods through the same interface, so capability compatibility does not leak into the simulation graph.
+
 ## Tiled stencil execution
 
 Divergence, pressure, and vorticity use CUDA-style workgroup tiling. Each 16 × 16 workgroup stages an 18 × 18 core-plus-halo tile in `var<workgroup>` memory, reaches `workgroupBarrier()`, and then evaluates the neighbor stencil from the tile. This keeps the synchronization local to each workgroup while avoiding repeated global neighbor loads inside those kernels. See [CUDA_TO_WEBGPU.md](CUDA_TO_WEBGPU.md) for the portable API mapping and limitations.
@@ -94,6 +98,8 @@ Initialization follows this sequence:
 6. Create the uniform buffer, textures, views, sampler, layouts, shader modules, pipeline layouts, pipelines, and bind groups.
 7. Configure the presentation canvas and zero every simulation resource.
 8. Start either a reduced-motion paused state or the animation loop.
+
+Capability negotiation is a hard gate before device creation. The policy requires the 16 × 16 stencil workgroup, enough storage-buffer capacity for the tracer workload, and optionally enables `timestamp-query` only when advertised by the adapter. If the optional feature is rejected during device creation, the policy retries once without it and records the resulting baseline tier. This makes unsupported hardware fail with a specific limit report instead of producing a later pipeline-creation error.
 
 Initialization is guarded by `app.initializing`, and the animation loop is guarded by `app.animationRunning`. Device loss cancels the loop, releases old resources, disables GPU controls, presents the reason, and exposes `Retry GPU`. A successful retry reconstructs the entire resource graph and resets the field.
 

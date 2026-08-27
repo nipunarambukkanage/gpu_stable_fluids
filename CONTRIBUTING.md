@@ -11,6 +11,8 @@ This repository contains a native CUDA C++ solver plus a dependency-free WebGPU 
 5. On a CUDA-capable machine, configure and build the native CMake target, then run a short frame-export smoke test.
 6. Update the relevant architecture, numerical, CUDA/WebGPU, native CUDA, and validation documentation when a GPU resource, shader, pass, or synchronization rule changes.
 
+The checked-in `.editorconfig` and `.clang-format` files define formatting expectations. The `quality` workflow runs the same repository contracts on every push and pull request. Native CUDA validation is exposed as a manual workflow for a self-hosted runner with `windows,cuda` labels because ordinary hosted runners do not provide a CUDA device.
+
 ## GPU change checklist
 
 - Keep sampled resources and storage destinations distinct within each pass.
@@ -22,6 +24,8 @@ This repository contains a native CUDA C++ solver plus a dependency-free WebGPU 
 - Label new textures, buffers, bind groups, pipelines, and passes for browser diagnostics.
 
 ## Commit and branch hygiene
+
+Keep commits scoped to one subsystem, describe the observable engineering change, and include the validation command in the handoff. Do not commit `build/`, generated native frames, local diagnostics, or machine-specific IDE metadata. Branches should be reviewed through a pull request before integration; pushing directly is reserved for an explicitly authorized workflow.
 
 ## Native CUDA checklist
 

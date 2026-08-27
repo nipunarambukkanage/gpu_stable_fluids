@@ -80,5 +80,9 @@ if(BUILD_TESTING AND FLUID_BUILD_TESTS)
   add_test(NAME native_config_contract COMMAND fluid_native_config_contract)
 endif()
 
-install(TARGETS fluid_cuda_demo RUNTIME DESTINATION bin)
+install(TARGETS fluid_cuda fluid_cuda_demo
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 install(DIRECTORY cuda/include/gpu_fluids DESTINATION include)

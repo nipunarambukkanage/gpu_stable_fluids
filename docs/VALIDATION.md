@@ -8,10 +8,21 @@ From the project directory:
 
 ```bash
 node tests/static-contract.mjs
+node tests/runtime-contract.mjs
 git diff --check
 ```
 
 The same checks are exposed as `npm run check`; `package.json` has no dependencies.
+
+The native contract test is part of the CMake build when `FLUID_BUILD_TESTS=ON` (the default):
+
+```bash
+cmake --preset cuda-release
+cmake --build --preset cuda-release
+ctest --preset cuda-release
+```
+
+The browser contracts run on every GitHub push and pull request. The native workflow is manual and requires a self-hosted CUDA runner so compilation and device execution are not confused with source-only validation.
 
 The repository should contain exactly one runnable HTML document:
 
@@ -74,6 +85,7 @@ The tracer smoke test should also show the GPU draw status as Indirect when enab
 - Divergence, pressure, and vorticity stage an 18 × 18 tile and synchronize with `workgroupBarrier()` before neighbor reads.
 - The adapter status reports `adapter.info` and the kernel status reports the workgroup shape plus the device invocation limit.
 - Optional timestamp buffers are created only after the adapter advertises `timestamp-query`; unsupported adapters stay on the unsynchronized path.
+- Compute and render pipelines use asynchronous creation when available and retain a synchronous compatibility fallback; both paths are covered by the runtime contract test.
 - Local telemetry aggregation never maps a GPU buffer and does not add a queue wait to the animation loop; only the optional timestamp profiler schedules an asynchronous small readback.
 - Semi-Lagrangian backtraces are bounded to 48 texels in both the WGSL and CUDA implementations.
 - Tracer buffers use `STORAGE | COPY_DST`, are initialized identically, and swap only after the tracer compute pass.

@@ -34,3 +34,29 @@ export function formatCapabilityFailure(capabilities) {
     .map(({ name, required, actual }) => `${name} requires ${required}, adapter exposes ${actual}`)
     .join("; ");
 }
+
+export async function requestDeviceWithFallback(adapter, capabilities) {
+  const request = (optionalFeatures) => adapter.requestDevice({
+    requiredFeatures: optionalFeatures,
+    requiredLimits: capabilities.requiredLimits
+  });
+
+  try {
+    return { device: await request(capabilities.optionalFeatures), capabilities };
+  } catch (primaryError) {
+    if (capabilities.optionalFeatures.length === 0) {
+      throw primaryError;
+    }
+    try {
+      const fallbackCapabilities = {
+        ...capabilities,
+        featureTier: "baseline",
+        optionalFeatures: []
+      };
+      return { device: await request([]), capabilities: fallbackCapabilities };
+    } catch (fallbackError) {
+      fallbackError.cause = primaryError;
+      throw fallbackError;
+    }
+  }
+}

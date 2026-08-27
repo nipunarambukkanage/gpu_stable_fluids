@@ -21,7 +21,8 @@ import {
   createInitialParticleData
 } from "./config/simulation.js";
 import { createGpuTimer, destroyGpuTimer, readGpuTimestamp } from "./gpu/timestamp-profiler.js";
-import { formatCapabilityFailure, inspectWebGpuAdapter } from "./gpu/capabilities.js";
+import { formatCapabilityFailure, inspectWebGpuAdapter, requestDeviceWithFallback } from "./gpu/capabilities.js";
+import { createGpuPipelineBatch } from "./gpu/pipeline-factory.js";
 import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, resetRuntimeTelemetry, snapshotRuntimeTelemetry } from "./gpu/telemetry.js";
 import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
 import { createDiagnosticsReport } from "./runtime/diagnostics.js";
@@ -437,6 +438,48 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
         indirectArgs: device.createPipelineLayout({ label: "GPU indirect draw arguments pipeline layout", bindGroupLayouts: [layouts.indirectArgs] })
       };
 
+      const [splatPipeline, advectionPipeline, divergencePipeline, pressurePipeline, gradientPipeline, vorticityPipeline, confinementPipeline, particlePipeline, renderPipeline, particleRenderPipeline, indirectArgsPipeline] = await createGpuPipelineBatch(device, [
+        { kind: "compute", descriptor: { label: "Splat pipeline", layout: pipelineLayouts.splat, compute: { module: splatModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "Advection pipeline", layout: pipelineLayouts.advection, compute: { module: advectionModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "Divergence pipeline", layout: pipelineLayouts.divergence, compute: { module: divergenceModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "Pressure pipeline", layout: pipelineLayouts.pressure, compute: { module: pressureModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "Pressure gradient pipeline", layout: pipelineLayouts.gradient, compute: { module: gradientModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "Vorticity pipeline", layout: pipelineLayouts.vorticity, compute: { module: vorticityModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "Vorticity confinement pipeline", layout: pipelineLayouts.confinement, compute: { module: confinementModule, entryPoint: "main" } } },
+        { kind: "compute", descriptor: { label: "GPU tracer compute pipeline", layout: pipelineLayouts.particles, compute: { module: particleComputeModule, entryPoint: "main" } } },
+        {
+          kind: "render",
+          descriptor: {
+            label: "Density render pipeline",
+            layout: pipelineLayouts.render,
+            vertex: { module: vertexModule, entryPoint: "main" },
+            fragment: { module: fragmentModule, entryPoint: "main", targets: [{ format: app.canvasFormat }] },
+            primitive: { topology: "triangle-list" }
+          }
+        },
+        {
+          kind: "render",
+          descriptor: {
+            label: "GPU tracer render pipeline",
+            layout: pipelineLayouts.particleRender,
+            vertex: { module: particleVertexModule, entryPoint: "main" },
+            fragment: {
+              module: particleFragmentModule,
+              entryPoint: "main",
+              targets: [{
+                format: app.canvasFormat,
+                blend: {
+                  color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                  alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
+                }
+              }]
+            },
+            primitive: { topology: "triangle-list" }
+          }
+        },
+        { kind: "compute", descriptor: { label: "GPU indirect draw arguments pipeline", layout: pipelineLayouts.indirectArgs, compute: { module: indirectArgsModule, entryPoint: "main" } } }
+      ]);
+
       return {
         shaders: {
           splat: splatModule,
@@ -455,75 +498,17 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
         },
         pipelineLayouts,
         pipelines: {
-          splat: device.createComputePipeline({
-            label: "Splat pipeline",
-            layout: pipelineLayouts.splat,
-            compute: { module: splatModule, entryPoint: "main" }
-          }),
-          advection: device.createComputePipeline({
-            label: "Advection pipeline",
-            layout: pipelineLayouts.advection,
-            compute: { module: advectionModule, entryPoint: "main" }
-          }),
-          divergence: device.createComputePipeline({
-            label: "Divergence pipeline",
-            layout: pipelineLayouts.divergence,
-            compute: { module: divergenceModule, entryPoint: "main" }
-          }),
-          pressure: device.createComputePipeline({
-            label: "Pressure pipeline",
-            layout: pipelineLayouts.pressure,
-            compute: { module: pressureModule, entryPoint: "main" }
-          }),
-          gradient: device.createComputePipeline({
-            label: "Pressure gradient pipeline",
-            layout: pipelineLayouts.gradient,
-            compute: { module: gradientModule, entryPoint: "main" }
-          }),
-          vorticity: device.createComputePipeline({
-            label: "Vorticity pipeline",
-            layout: pipelineLayouts.vorticity,
-            compute: { module: vorticityModule, entryPoint: "main" }
-          }),
-          confinement: device.createComputePipeline({
-            label: "Vorticity confinement pipeline",
-            layout: pipelineLayouts.confinement,
-            compute: { module: confinementModule, entryPoint: "main" }
-          }),
-          particles: device.createComputePipeline({
-            label: "GPU tracer compute pipeline",
-            layout: pipelineLayouts.particles,
-            compute: { module: particleComputeModule, entryPoint: "main" }
-          }),
-          render: device.createRenderPipeline({
-            label: "Density render pipeline",
-            layout: pipelineLayouts.render,
-            vertex: { module: vertexModule, entryPoint: "main" },
-            fragment: { module: fragmentModule, entryPoint: "main", targets: [{ format: app.canvasFormat }] },
-            primitive: { topology: "triangle-list" }
-          }),
-          particleRender: device.createRenderPipeline({
-            label: "GPU tracer render pipeline",
-            layout: pipelineLayouts.particleRender,
-            vertex: { module: particleVertexModule, entryPoint: "main" },
-            fragment: {
-              module: particleFragmentModule,
-              entryPoint: "main",
-              targets: [{
-                format: app.canvasFormat,
-                blend: {
-                  color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-                  alpha: { srcFactor: "one", dstFactor: "one", operation: "add" }
-                }
-              }]
-            },
-            primitive: { topology: "triangle-list" }
-          }),
-          indirectArgs: device.createComputePipeline({
-            label: "GPU indirect draw arguments pipeline",
-            layout: pipelineLayouts.indirectArgs,
-            compute: { module: indirectArgsModule, entryPoint: "main" }
-          })
+          splat: splatPipeline,
+          advection: advectionPipeline,
+          divergence: divergencePipeline,
+          pressure: pressurePipeline,
+          gradient: gradientPipeline,
+          vorticity: vorticityPipeline,
+          confinement: confinementPipeline,
+          particles: particlePipeline,
+          render: renderPipeline,
+          particleRender: particleRenderPipeline,
+          indirectArgs: indirectArgsPipeline
         }
       };
     }
@@ -792,14 +777,15 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
         if (!capabilities.supported) {
           throw new Error(formatCapabilityFailure(capabilities));
         }
-        const device = await adapter.requestDevice({ requiredFeatures: capabilities.optionalFeatures, requiredLimits: capabilities.requiredLimits });
+        const deviceSelection = await requestDeviceWithFallback(adapter, capabilities);
+        const device = deviceSelection.device;
         const context = canvas.getContext("webgpu");
         if (!context) {
           throw new Error("Could not acquire a WebGPU canvas context.");
         }
 
         app.adapter = adapter;
-        app.capabilities = capabilities;
+        app.capabilities = deviceSelection.capabilities;
         app.device = device;
         app.context = context;
         app.canvasFormat = navigator.gpu.getPreferredCanvasFormat();

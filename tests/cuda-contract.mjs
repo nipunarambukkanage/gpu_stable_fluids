@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 const requiredFiles = [
   "CMakeLists.txt",
+  "CMakePresets.json",
   "cuda/include/gpu_fluids/config.hpp",
   "cuda/include/gpu_fluids/cuda_utils.hpp",
   "cuda/include/gpu_fluids/solver.hpp",
@@ -11,6 +12,7 @@ const requiredFiles = [
   "cuda/src/solver.cu",
   "cuda/src/sph_solver.cu",
   "cuda/src/visualization.cpp",
+  "tests/native/config_contract.cpp",
   "docs/CUDA_NATIVE.md"
 ];
 
@@ -32,10 +34,13 @@ const header = read("cuda/include/gpu_fluids/solver.hpp");
 const sphHeader = read("cuda/include/gpu_fluids/sph_solver.hpp");
 const config = read("cuda/include/gpu_fluids/config.hpp");
 const cli = read("cuda/src/main.cpp");
+const cmakePresets = read("CMakePresets.json");
 
 assert(cmake.includes("project(gpu_stable_fluids_native LANGUAGES CXX CUDA)"), "CMake must enable native C++ and CUDA languages");
 assert(cmake.includes("find_package(CUDAToolkit REQUIRED)"), "CMake must link the CUDA toolkit explicitly");
 assert(cmake.includes("CUDA_SEPARABLE_COMPILATION ON"), "CMake must enable separable CUDA compilation");
+assert(cmake.includes("add_test(NAME native_config_contract"), "CMake must register the native configuration contract test");
+assert(cmakePresets.includes('"cuda-release"') && cmakePresets.includes('"CMAKE_CUDA_ARCHITECTURES"'), "CMake presets must define a reproducible CUDA release configuration");
 assert(config.includes("static_assert(sizeof(SimulationParams) == 112"), "host/device parameter layout must remain explicitly validated");
 assert(config.includes("kMaxBacktraceDistance = 48.0F"), "native configuration must own the backtrace stability limit");
 assert(solver.includes("backtraceDisplacement") && solver.includes("hypotf"), "native advection must bound extreme backtrace displacement");

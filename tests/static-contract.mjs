@@ -2,17 +2,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const requiredFiles = [
+  "CMakePresets.json",
+  ".editorconfig",
+  ".clang-format",
+  ".gitattributes",
+  ".github/workflows/quality.yml",
+  ".github/workflows/native-cuda.yml",
   "fluid-simulation.html",
   "styles/fluid-lab.css",
   "src/main.js",
   "src/config/simulation.js",
   "src/gpu/capabilities.js",
+  "src/gpu/pipeline-factory.js",
   "src/gpu/timestamp-profiler.js",
   "src/gpu/telemetry.js",
   "src/gpu/shaders.js",
   "src/runtime/diagnostics.js",
   "docs/ARCHITECTURE.md",
   "docs/CUDA_TO_WEBGPU.md",
+  "docs/DIAGNOSTICS_SCHEMA.md",
   "docs/NUMERICAL_METHOD.md",
   "docs/VALIDATION.md",
   "docs/screenshots/webgpu-lab-mockup.png",
@@ -36,6 +44,7 @@ const html = read("fluid-simulation.html");
 const runtime = read("src/main.js");
 const config = read("src/config/simulation.js");
 const capabilities = read("src/gpu/capabilities.js");
+const pipelineFactory = read("src/gpu/pipeline-factory.js");
 const profiler = read("src/gpu/timestamp-profiler.js");
 const telemetry = read("src/gpu/telemetry.js");
 const shaders = read("src/gpu/shaders.js");
@@ -52,7 +61,8 @@ assert(runtime.includes('"./gpu/timestamp-profiler.js"'), "main entry must impor
 assert(runtime.includes('"./gpu/shaders.js"'), "main entry must import the GPU shader module");
 assert(config.includes("export const GRID_WIDTH = 512"), "simulation configuration must own the fixed grid size");
 assert(config.includes("export const MAX_BACKTRACE_DISTANCE = 48"), "simulation configuration must own the backtrace stability limit");
-assert(capabilities.includes("inspectWebGpuAdapter"), "GPU capability policy must be isolated in a testable module");
+assert(capabilities.includes("inspectWebGpuAdapter") && capabilities.includes("requestDeviceWithFallback"), "GPU capability policy must be isolated in a testable module");
+assert(pipelineFactory.includes("createComputePipelineAsync") && pipelineFactory.includes("createGpuPipelineBatch"), "pipeline creation must support asynchronous compilation with a fallback");
 assert(profiler.includes("timestamp-query"), "GPU profiler module must use optional timestamp-query");
 assert(telemetry.includes("snapshotRuntimeTelemetry"), "runtime telemetry must expose a serializable diagnostics snapshot");
 assert(diagnostics.includes("DIAGNOSTICS_SCHEMA_VERSION"), "diagnostics module must expose a versioned report schema");
@@ -68,9 +78,9 @@ assert((shaders.match(/workgroupBarrier\(\)/g) || []).length === 3, "tiled stenc
 assert(runtime.includes("PARTICLE_COUNT"), "runtime must retain GPU tracer workload configuration");
 assert(runtime.includes("GPUBufferUsage.INDIRECT"), "tracer draw arguments must use an indirect-capable GPU buffer");
 assert(runtime.includes("drawIndirect"), "tracer rendering must consume GPU-generated indirect arguments");
-assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${capabilities}\n${profiler}\n${telemetry}\n${shaders}\n${diagnostics}`), "runtime must remain local and free of forbidden dependencies");
+assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${capabilities}\n${pipelineFactory}\n${profiler}\n${telemetry}\n${shaders}\n${diagnostics}`), "runtime must remain local and free of forbidden dependencies");
 
-for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/capabilities.js", "src/gpu/timestamp-profiler.js", "src/gpu/telemetry.js", "src/gpu/shaders.js", "src/runtime/diagnostics.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
+for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/capabilities.js", "src/gpu/pipeline-factory.js", "src/gpu/timestamp-profiler.js", "src/gpu/telemetry.js", "src/gpu/shaders.js", "src/runtime/diagnostics.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", modulePath], { encoding: "utf8" });
   assert(result.status === 0, `${modulePath} failed Node syntax validation: ${result.stderr.trim()}`);
 }
