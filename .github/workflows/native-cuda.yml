@@ -1,0 +1,22 @@
+name: native-cuda
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-release:
+    name: CUDA release build and native contracts
+    runs-on: [self-hosted, windows, cuda]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset cuda-release
+      - name: Build
+        run: cmake --build --preset cuda-release
+      - name: Run native tests
+        run: ctest --preset cuda-release

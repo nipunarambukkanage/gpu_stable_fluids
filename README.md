@@ -23,6 +23,8 @@ The native path is organized as an industrial CMake project with persistent devi
 - Auto-demo figure-eight flow for hands-off presentation.
 - Local PNG snapshots generated from the presentation canvas; nothing is uploaded.
 - Optional asynchronous GPU timestamp sampling without a per-frame readback stall.
+- In-memory frame pacing and submission telemetry with a local diagnostics JSON export.
+- Bounded semi-Lagrangian backtracing in both browser WGSL and native CUDA paths for high-velocity resilience.
 - Pause/resume, clear/reset, hidden controls, responsive sizing, high-DPI support, visibility-aware timing, and device-loss recovery.
 - Accessible labels, keyboard shortcuts, visible focus states, readable status reporting, and reduced-motion startup behavior.
 
@@ -40,6 +42,7 @@ gpu_stable_fluids/
 │   │   └── simulation.js       # Shared grid, workload, buffer, and particle constants
 │   └── gpu/
 │       ├── shaders.js           # WGSL compute/render source catalog
+│       ├── telemetry.js         # Local frame pacing and GPU sample aggregation
 │       └── timestamp-profiler.js # Optional asynchronous timestamp-query profiler
 ├── cuda/
 │   ├── include/gpu_fluids/     # Native solver, configuration, diagnostics, and output APIs
@@ -58,7 +61,8 @@ gpu_stable_fluids/
     ├── CUDA_NATIVE.md          # Native CUDA ownership, memory, streams, kernels, and build guide
     ├── CUDA_TO_WEBGPU.md       # CUDA concept mapping, tiled kernels, and portability boundaries
     ├── NUMERICAL_METHOD.md     # Stable Fluids equations, coordinate conventions, and GPU passes
-    └── VALIDATION.md            # Static checks, browser smoke tests, and regression checklist
+    ├── VALIDATION.md            # Static checks, browser smoke tests, and regression checklist
+    └── screenshots/             # Repository-bound visual documentation mockups
 ```
 
 The native runtime is built by CMake and the browser preview deliberately has no `node_modules`, bundler, generated assets, or hidden build output. `package.json` contains only preview, serve, and repository-contract commands and has no dependencies. The documentation is separated into `docs/`, while `cuda/`, `src/`, `styles/`, `tests/`, and `tools/` make ownership boundaries explicit.
@@ -110,6 +114,14 @@ npm run check
 
 Opening the HTML directly may work in some browsers, but `localhost` is the reliable option for WebGPU’s secure-context and ES-module requirements.
 
+## Visual documentation
+
+The repository includes two visual documentation mockups for the two execution paths. They are stored locally so README rendering does not depend on a hosted image service. The mockups communicate the intended GPU laboratory presentation and CUDA/SPH dataflow; they are not claims of a runtime capture from this environment.
+
+![WebGPU stable-fluids laboratory visual mockup](docs/screenshots/webgpu-lab-mockup.png)
+
+![CUDA SPH pipeline visual mockup](docs/screenshots/cuda-sph-pipeline-mockup.png)
+
 ## Portable WebGPU preview hardware target
 
 Use a current desktop Chromium-based browser such as Chrome or Edge with WebGPU enabled. The app checks `window.isSecureContext`, `navigator.gpu`, adapter availability, canvas context creation, shader compilation, pipeline creation, and device loss. If initialization fails, the UI shows a human-readable reason and exposes a `Retry GPU` action.
@@ -132,6 +144,7 @@ The application does not provide a WebGL fallback. This is intentional: the nume
 | Clear | Zeros every simulation texture and resets pointer/timing state. |
 | Auto demo | Runs a local procedural figure-eight stroke. Dragging takes control back. |
 | Save PNG | Saves the visible canvas locally as a PNG file. |
+| Save diagnostics JSON | Saves a local, versioned report containing settings, adapter limits, feature flags, frame pacing, submissions, and asynchronous GPU samples. |
 
 Keyboard shortcuts:
 
@@ -190,6 +203,8 @@ The solver now uses a CUDA-like tiled stencil design while remaining a zero-inst
 
 The page also reports adapter identity and compute limits, wraps initialization in a WebGPU validation error scope, and handles uncaptured validation errors and device loss. When available, `timestamp-query` measures the complete GPU frame asynchronously every 30 frames; the timer never maps a buffer or waits for GPU completion inside the animation loop. These are WebGPU equivalents of the diagnostics and capability checks expected in a native GPU application.
 
+The diagnostics panel keeps a small in-memory view of CPU encode time, frame pacing, submitted command buffers, and asynchronous GPU timestamp samples. `Save diagnostics JSON` serializes that state together with the active solver settings, adapter limits, device features, workgroup shape, and simulation constants. The report is created with a browser object URL and is never uploaded.
+
 The tracer toggle controls a fully GPU-resident Lagrangian visualization. A 64-thread compute kernel samples the projected velocity field, integrates each particle, respawns escaped or expired particles deterministically, and swaps storage buffers. An instanced render pipeline draws all particles without a CPU position readback; disabling the toggle skips both the compute and overlay draw.
 
 The tracer overlay also uses a one-invocation GPU pass to write the four-word indirect draw command. The render pass consumes that command directly, so neither particle positions nor the draw count cross the GPU/CPU boundary.
@@ -208,6 +223,8 @@ Advection uses manual bilinear sampling because the velocity field is `rg32float
 decay = exp(-dissipationRate × deltaTime)
 ```
 
+The browser WGSL and native CUDA implementations cap each semi-Lagrangian backtrace at 48 texels. This guards the interpolation footprint against extreme velocities and long-frame recovery while preserving the normal GPU-resident update path.
+
 The pressure solve uses Neumann-like boundary samples, while velocity boundary samples mirror the normal component and the final projection explicitly zeros normal velocity on the outer grid. Full equations and coordinate details are in [docs/NUMERICAL_METHOD.md](docs/NUMERICAL_METHOD.md).
 
 ## Reliability and privacy
@@ -217,11 +234,12 @@ The pressure solve uses Neumann-like boundary samples, while velocity boundary s
 - Uncaptured validation errors are surfaced in the status panel and console.
 - Large frame gaps, pointer re-entry, and long pointer-event gaps cannot create unbounded velocity impulses.
 - PNG export uses a browser object URL and is revoked immediately after the local download is triggered.
+- Diagnostics export is a local JSON object URL containing only current runtime settings and aggregated performance counters; it is not network telemetry.
 - No network request, telemetry, tracking, advertisement, external font, image, shader, or package is used at runtime.
 
 ## Validation performed
 
-The implementation has been checked with JavaScript parsing, diff whitespace checks, WebGPU static requirements, a native CUDA source contract, and a Chrome WebGPU smoke test. nvcc is not installed in the current environment, so the native translation unit still needs a CUDA-capable build machine for compiler and hardware validation. The browser test covered initialization, shader compilation, pipeline creation, normal drag painting, color preset selection, turbulent/vorticity mode, auto-demo, pause/resume, clear, responsive layout, indirect tracer rendering, and console validation errors.
+The implementation has been checked with JavaScript parsing, diff whitespace checks, WebGPU static requirements, a native CUDA source contract, and a Chrome WebGPU smoke test. nvcc is not installed in the current environment, so the native translation unit still needs a CUDA-capable build machine for compiler and hardware validation. The browser test covered initialization, shader compilation, pipeline creation, normal drag painting, color preset selection, turbulent/vorticity mode, auto-demo, pause/resume, clear, responsive layout, indirect tracer rendering, local diagnostics export, and console validation errors.
 
 Use [docs/VALIDATION.md](docs/VALIDATION.md) for the repeatable checklist and maintenance guidance.
 
