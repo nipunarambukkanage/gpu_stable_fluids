@@ -2,7 +2,7 @@
 
 The native CUDA C++ target under cuda/ is the primary high-performance execution path. The browser modules remain a portable WebGPU preview with a parallel resource graph, while the native solver owns CUDA Runtime API allocations, streams, events, shared-memory kernels, and CPU-coordinated frame export.
 
-The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
+The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; `src/gpu/telemetry.js` owns dependency-free local performance aggregation; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, diagnostics export, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
 
 ## Runtime layers
 
@@ -65,6 +65,8 @@ No simulation texture is sampled and storage-written in the same pass. The JavaS
 The loop does not map buffers, read textures back to the CPU, wait for GPU completion, or create pipelines/bind groups. Only the per-frame uniform upload and transient encoder/pass descriptors occur in the hot path. On adapters exposing `timestamp-query`, one sampled frame every 30 iterations adds two timestamp writes and an asynchronous readback request; all other frames remain unchanged.
 
 When tracers are enabled, a one-invocation compute pass refreshes the indirect draw record before the tracer workload and render pass. This command data remains device-local and does not require a CPU readback.
+
+The runtime telemetry module records only local counters: submitted command buffers, long-frame count, exponentially smoothed CPU encode time, and asynchronous GPU timestamp samples. It is intentionally separate from the simulation state and has no network or persistence side effect until the user explicitly selects `Save diagnostics JSON`. The export includes a schema version so future fields can be added without making existing reports ambiguous.
 
 ## Tiled stencil execution
 

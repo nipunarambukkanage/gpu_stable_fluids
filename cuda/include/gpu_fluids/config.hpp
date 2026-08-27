@@ -12,6 +12,7 @@ constexpr int kBlockSize = 16;
 constexpr int kBlocksX = kGridWidth / kBlockSize;
 constexpr int kBlocksY = kGridHeight / kBlockSize;
 constexpr int kPressureIterations = 20;
+constexpr float kMaxBacktraceDistance = 48.0F;
 constexpr int kParticleCount = 8192;
 constexpr int kParticleBlockSize = 128;
 constexpr int kParticleBlocks = (kParticleCount + kParticleBlockSize - 1) / kParticleBlockSize;
