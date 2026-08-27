@@ -33,23 +33,25 @@ export function destroyGpuTimer(timer) {
   timer?.readbackBuffer?.destroy();
 }
 
-export async function readGpuTimestamp(timer, app, gpuTimeStatus) {
+export async function readGpuTimestamp(timer, app, gpuTimeStatus, onSample = null) {
   if (!timer || timer.pending) {
     return;
   }
   timer.pending = true;
+  let mapped = false;
   try {
     await timer.device.queue.onSubmittedWorkDone();
     if (app.gpuTimer !== timer || app.device !== timer.device) {
       return;
     }
     await timer.readbackBuffer.mapAsync(GPUMapMode.READ);
+    mapped = true;
     const timestamps = new BigUint64Array(timer.readbackBuffer.getMappedRange());
     const durationMilliseconds = Number(timestamps[1] - timestamps[0]) / 1_000_000;
-    timer.readbackBuffer.unmap();
     if (app.gpuTimer === timer && app.device === timer.device && Number.isFinite(durationMilliseconds)) {
       gpuTimeStatus.textContent = `${durationMilliseconds.toFixed(2)} ms`;
       gpuTimeStatus.title = "Asynchronous timestamp-query sample for the complete simulation and render command sequence.";
+      onSample?.(durationMilliseconds);
     }
   } catch (error) {
     if (app.gpuTimer === timer) {
@@ -58,6 +60,9 @@ export async function readGpuTimestamp(timer, app, gpuTimeStatus) {
       gpuTimeStatus.title = error instanceof Error ? error.message : "GPU timestamp readback failed.";
     }
   } finally {
+    if (mapped) {
+      timer.readbackBuffer.unmap();
+    }
     timer.pending = false;
   }
 }

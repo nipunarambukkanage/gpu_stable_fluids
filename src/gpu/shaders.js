@@ -1,4 +1,4 @@
-import { PARTICLE_COUNT } from "../config/simulation.js";
+import { MAX_BACKTRACE_DISTANCE, PARTICLE_COUNT } from "../config/simulation.js";
 
 export const splatShaderCode = `
       struct SimParams {
@@ -150,7 +150,12 @@ export const advectionShaderCode = `
         let coordinate = vec2<i32>(globalId.xy);
         let point = vec2<f32>(coordinate) + vec2<f32>(0.5);
         let currentVelocity = loadVelocity(coordinate);
-        let backTracedPosition = point - params.timeDtDissipation.y * currentVelocity;
+        var backtraceDisplacement = params.timeDtDissipation.y * currentVelocity;
+        let backtraceLength = length(backtraceDisplacement);
+        if (backtraceLength > ${MAX_BACKTRACE_DISTANCE}.0) {
+          backtraceDisplacement *= ${MAX_BACKTRACE_DISTANCE}.0 / backtraceLength;
+        }
+        let backTracedPosition = point - backtraceDisplacement;
         let advectedVelocity = sampleVelocity(backTracedPosition);
         let advectedDensity = sampleDensity(backTracedPosition);
         let velocityDecay = exp(-params.timeDtDissipation.z * params.timeDtDissipation.y);
