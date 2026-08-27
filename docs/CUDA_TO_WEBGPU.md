@@ -57,6 +57,8 @@ Each invocation first stages its core cell. Boundary invocations additionally st
 
 This is the WebGPU analogue of a shared-memory CUDA stencil. Workgroup memory is local to one workgroup and is not persistent between passes, so the halo is intentionally reloaded for every divergence, pressure, or vorticity dispatch. The pressure solver still uses 20 Jacobi passes and ping-pongs its pressure textures; tiling changes memory locality, not the algorithm’s synchronization boundary.
 
+The browser and native paths also share a 48-texel semi-Lagrangian backtrace cap. This is a numerical guardrail rather than a synchronization optimization: it keeps extreme velocities from creating oversized interpolation excursions while leaving the GPU-resident pass ordering unchanged.
+
 ## Why 16 × 16 workgroups
 
 The fixed 16 × 16 shape gives 256 invocations per workgroup, maps cleanly to the 512 × 512 grid, and leaves enough room for the 18 × 18 halo tile on typical WebGPU devices. The status panel displays the selected shape and the adapter’s `maxComputeInvocationsPerWorkgroup` limit. It also exposes the maximum dispatch dimension as a tooltip.

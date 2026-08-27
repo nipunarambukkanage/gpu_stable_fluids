@@ -171,9 +171,18 @@ __global__ void advectKernel(
   const int index = cellIndex(x, y);
   const float2 position = make_float2(static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F);
   const float2 localVelocity = sampleVelocity(velocityIn, position);
+  float2 backtraceDisplacement = make_float2(
+      localVelocity.x * cParams.deltaTime,
+      localVelocity.y * cParams.deltaTime);
+  const float backtraceLength = hypotf(backtraceDisplacement.x, backtraceDisplacement.y);
+  if (backtraceLength > kMaxBacktraceDistance) {
+    const float scale = kMaxBacktraceDistance / backtraceLength;
+    backtraceDisplacement.x *= scale;
+    backtraceDisplacement.y *= scale;
+  }
   const float2 backtraced = make_float2(
-      position.x - localVelocity.x * cParams.deltaTime,
-      position.y - localVelocity.y * cParams.deltaTime);
+      position.x - backtraceDisplacement.x,
+      position.y - backtraceDisplacement.y);
   const float2 advectedVelocity = sampleVelocity(velocityIn, backtraced);
   const float4 advectedDensity = sampleDensity(densityIn, backtraced);
   const float velocityDecay = expf(-cParams.velocityDissipation * cParams.deltaTime * 60.0F);
