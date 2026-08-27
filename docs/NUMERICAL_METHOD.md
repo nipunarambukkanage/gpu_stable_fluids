@@ -60,6 +60,8 @@ densityDecay  = exp(-inkDissipation × deltaTime)
 
 This makes decay approximately frame-rate independent.
 
+Both implementations also cap the backtrace displacement at 48 texels per step. This limiter prevents a long frame or an extreme injected velocity from sampling an unnecessarily distant cell, which reduces temporal popping while preserving the solver's semi-Lagrangian stability. The frame coordinator still clamps normal frame deltas before they reach the GPU.
+
 ## 3. Optional vorticity confinement
 
 When the control is `Off`, this path is skipped and the base Stable Fluids sequence is unchanged. When enabled, the curl pass computes:
