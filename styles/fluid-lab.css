@@ -97,6 +97,84 @@
       line-height: 1.55;
     }
 
+    .performance-hud {
+      position: absolute;
+      top: clamp(0.75rem, 2.4vw, 1.5rem);
+      right: clamp(0.75rem, 2.4vw, 1.5rem);
+      width: min(19rem, calc(100vw - 1.5rem));
+      padding: 0.8rem;
+      border: 1px solid rgba(100, 216, 255, 0.3);
+      border-radius: 0.85rem;
+      background: rgba(3, 12, 20, 0.78);
+      box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(16px);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .performance-hud[hidden] {
+      display: none;
+    }
+
+    .hud-heading,
+    .hud-footer,
+    .hud-grid div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.7rem;
+    }
+
+    .hud-heading {
+      color: var(--accent-strong);
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .hud-heading span:last-child {
+      color: var(--warning);
+      font-size: 0.58rem;
+    }
+
+    .hud-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.55rem 0.8rem;
+      margin-top: 0.7rem;
+      padding: 0.65rem 0;
+      border-top: 1px solid rgba(158, 201, 232, 0.12);
+      border-bottom: 1px solid rgba(158, 201, 232, 0.12);
+    }
+
+    .hud-grid div {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .hud-grid span,
+    .hud-footer span {
+      color: var(--faint);
+      font-size: 0.62rem;
+    }
+
+    .hud-grid strong,
+    .hud-footer strong {
+      overflow: hidden;
+      max-width: 100%;
+      color: var(--text);
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hud-footer {
+      margin-top: 0.65rem;
+    }
+
     .controls {
       position: absolute;
       top: clamp(0.75rem, 2.4vw, 1.5rem);
@@ -430,6 +508,12 @@
         bottom: 0.75rem;
         left: auto;
         display: block;
+      }
+
+      .performance-hud {
+        top: 0.75rem;
+        right: 0.75rem;
+        width: min(17rem, calc(100vw - 1.5rem));
       }
     }
 

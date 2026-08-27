@@ -4,6 +4,13 @@ import { formatCapabilityFailure, inspectWebGpuAdapter, requestDeviceWithFallbac
 import { createGpuPipelineBatch } from "../src/gpu/pipeline-factory.js";
 import { createDiagnosticsReport, DIAGNOSTICS_SCHEMA_VERSION } from "../src/runtime/diagnostics.js";
 import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, snapshotRuntimeTelemetry } from "../src/gpu/telemetry.js";
+import { DEFAULT_QUALITY_PROFILE, QUALITY_PROFILES } from "../src/config/simulation.js";
+
+assert.equal(DEFAULT_QUALITY_PROFILE, "balanced");
+assert.deepEqual(
+  Object.fromEntries(Object.entries(QUALITY_PROFILES).map(([name, profile]) => [name, profile.pressureIterations])),
+  { performance: 8, balanced: 20, cinematic: 36 }
+);
 
 const supportedAdapter = {
   limits: {
