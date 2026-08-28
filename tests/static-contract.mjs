@@ -17,7 +17,10 @@ const requiredFiles = [
   "src/gpu/timestamp-profiler.js",
   "src/gpu/telemetry.js",
   "src/gpu/shaders.js",
+  "src/runtime/adaptive-quality.js",
   "src/runtime/diagnostics.js",
+  "src/runtime/input-recorder.js",
+  "src/runtime/settings-store.js",
   "src/ui/performance-hud.js",
   "docs/ARCHITECTURE.md",
   "docs/CUDA_TO_WEBGPU.md",
@@ -49,7 +52,10 @@ const pipelineFactory = read("src/gpu/pipeline-factory.js");
 const profiler = read("src/gpu/timestamp-profiler.js");
 const telemetry = read("src/gpu/telemetry.js");
 const shaders = read("src/gpu/shaders.js");
+const adaptiveQuality = read("src/runtime/adaptive-quality.js");
 const diagnostics = read("src/runtime/diagnostics.js");
+const inputRecorder = read("src/runtime/input-recorder.js");
+const settingsStore = read("src/runtime/settings-store.js");
 const hud = read("src/ui/performance-hud.js");
 const styles = read("styles/fluid-lab.css");
 const readme = read("README.md");
@@ -68,25 +74,34 @@ assert(capabilities.includes("inspectWebGpuAdapter") && capabilities.includes("r
 assert(pipelineFactory.includes("createComputePipelineAsync") && pipelineFactory.includes("createGpuPipelineBatch"), "pipeline creation must support asynchronous compilation with a fallback");
 assert(profiler.includes("timestamp-query"), "GPU profiler module must use optional timestamp-query");
 assert(telemetry.includes("snapshotRuntimeTelemetry"), "runtime telemetry must expose a serializable diagnostics snapshot");
+assert(adaptiveQuality.includes("createAdaptiveQualityGovernor"), "adaptive quality must be isolated in a reusable governor module");
 assert(diagnostics.includes("DIAGNOSTICS_SCHEMA_VERSION"), "diagnostics module must expose a versioned report schema");
+assert(inputRecorder.includes("validateInputRecording"), "input macro recording must expose a validation boundary");
+assert(settingsStore.includes("SETTINGS_SCHEMA_VERSION") && settingsStore.includes("sanitizeSettings"), "settings persistence must be versioned and sanitized");
 assert(hud.includes("createPerformanceHud"), "performance HUD must be isolated as a reusable UI component");
 assert(html.includes("Save diagnostics JSON"), "UI must expose local diagnostics export");
 assert(html.includes('id="qualityProfile"') && html.includes('id="hudToggle"'), "UI must expose quality and performance HUD controls");
+assert(html.includes('id="renderMode"') && html.includes('id="brushMode"'), "UI must expose diagnostic field and brush mode controls");
+assert(html.includes('id="adaptiveQualityToggle"') && html.includes('id="rememberToggle"'), "UI must expose adaptive quality and settings persistence controls");
+assert(html.includes('id="recordButton"') && html.includes('id="replayButton"'), "UI must expose stroke macro controls");
 assert(runtime.includes("recordRuntimeSubmission"), "runtime must count submitted GPU command buffers");
 assert(runtime.includes("simulationSettings.pressureIterations") && runtime.includes("createPerformanceHud"), "runtime must apply quality profiles and update the HUD");
+assert(runtime.includes("particleIndex: 0"), "GPU resource state must initialize tracer ping-pong index");
+assert(runtime.includes("app.qualityGovernor.observe") && runtime.includes("updateReplayPointer"), "runtime must connect adaptive quality and macro replay to the frame loop");
 assert(readme.includes("docs/screenshots/webgpu-lab-mockup.png") && readme.includes("docs/screenshots/cuda-sph-pipeline-mockup.png"), "README must reference both repository visual assets");
 assert(readme.includes("Save diagnostics JSON"), "README must document the diagnostics export");
 assert(shaders.includes("export const particleComputeShaderCode"), "GPU shader module must own the tracer compute source");
 assert(shaders.includes("export const indirectArgsShaderCode"), "GPU shader module must own the indirect draw-arguments source");
+assert(shaders.includes("let brushMode") && shaders.includes("velocityTexture") && shaders.includes("vorticityTexture"), "GPU shaders must expose brush modes and diagnostic field inputs");
 assert(styles.includes(":root"), "external stylesheet must contain the application design tokens");
 assert((shaders.match(/@compute @workgroup_size\(/g) || []).length === 9, "GPU shader module must contain the nine expected compute entry points");
 assert((shaders.match(/workgroupBarrier\(\)/g) || []).length === 3, "tiled stencil kernels must retain three workgroup barriers");
 assert(runtime.includes("PARTICLE_COUNT"), "runtime must retain GPU tracer workload configuration");
 assert(runtime.includes("GPUBufferUsage.INDIRECT"), "tracer draw arguments must use an indirect-capable GPU buffer");
 assert(runtime.includes("drawIndirect"), "tracer rendering must consume GPU-generated indirect arguments");
-assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${capabilities}\n${pipelineFactory}\n${profiler}\n${telemetry}\n${shaders}\n${diagnostics}\n${hud}`), "runtime must remain local and free of forbidden dependencies");
+assert(!new RegExp(`TODO|${forbiddenMarker}|fetch\\(|from ['"]https?:`, "i").test(`${runtime}\n${config}\n${capabilities}\n${pipelineFactory}\n${profiler}\n${telemetry}\n${shaders}\n${adaptiveQuality}\n${diagnostics}\n${inputRecorder}\n${settingsStore}\n${hud}`), "runtime must remain local and free of forbidden dependencies");
 
-for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/capabilities.js", "src/gpu/pipeline-factory.js", "src/gpu/timestamp-profiler.js", "src/gpu/telemetry.js", "src/gpu/shaders.js", "src/runtime/diagnostics.js", "src/ui/performance-hud.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
+for (const modulePath of ["src/main.js", "src/config/simulation.js", "src/gpu/capabilities.js", "src/gpu/pipeline-factory.js", "src/gpu/timestamp-profiler.js", "src/gpu/telemetry.js", "src/gpu/shaders.js", "src/runtime/adaptive-quality.js", "src/runtime/diagnostics.js", "src/runtime/input-recorder.js", "src/runtime/settings-store.js", "src/ui/performance-hud.js", "tools/serve.mjs", "tests/static-contract.mjs"]) {
   const result = spawnSync(process.execPath, ["--check", modulePath], { encoding: "utf8" });
   assert(result.status === 0, `${modulePath} failed Node syntax validation: ${result.stderr.trim()}`);
 }

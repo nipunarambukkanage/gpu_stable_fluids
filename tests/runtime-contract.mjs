@@ -3,14 +3,55 @@ import assert from "node:assert/strict";
 import { formatCapabilityFailure, inspectWebGpuAdapter, requestDeviceWithFallback } from "../src/gpu/capabilities.js";
 import { createGpuPipelineBatch } from "../src/gpu/pipeline-factory.js";
 import { createDiagnosticsReport, DIAGNOSTICS_SCHEMA_VERSION } from "../src/runtime/diagnostics.js";
+import { createAdaptiveQualityGovernor } from "../src/runtime/adaptive-quality.js";
+import { createInputRecorder, validateInputRecording } from "../src/runtime/input-recorder.js";
+import { clearSettings, loadSettings, saveSettings, SETTINGS_SCHEMA_VERSION, SETTINGS_STORAGE_KEY } from "../src/runtime/settings-store.js";
 import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, snapshotRuntimeTelemetry } from "../src/gpu/telemetry.js";
-import { DEFAULT_QUALITY_PROFILE, QUALITY_PROFILES } from "../src/config/simulation.js";
+import { BRUSH_MODES, DEFAULT_BRUSH_MODE, DEFAULT_QUALITY_PROFILE, DEFAULT_RENDER_MODE, QUALITY_PROFILES, RENDER_MODES } from "../src/config/simulation.js";
 
 assert.equal(DEFAULT_QUALITY_PROFILE, "balanced");
 assert.deepEqual(
   Object.fromEntries(Object.entries(QUALITY_PROFILES).map(([name, profile]) => [name, profile.pressureIterations])),
   { performance: 8, balanced: 20, cinematic: 36 }
 );
+assert.equal(DEFAULT_RENDER_MODE, "density");
+assert.equal(DEFAULT_BRUSH_MODE, "paint");
+assert.equal(BRUSH_MODES.erase.value, 2);
+assert.equal(RENDER_MODES.vorticity.label, "Vorticity");
+
+const governor = createAdaptiveQualityGovernor({ cooldownMs: 0, downshiftSampleThreshold: 2, upshiftSampleThreshold: 3 });
+assert.equal(governor.observe(30, 0), null);
+assert.equal(governor.observe(30, 1).profile, "performance");
+assert.equal(governor.snapshot().pressureIterations, 8);
+assert.equal(governor.observe(1, 2), null);
+assert.equal(governor.observe(1, 3), null);
+assert.equal(governor.observe(1, 4).profile, "balanced");
+
+const recorder = createInputRecorder({ maxSamples: 2 });
+recorder.start(100);
+assert.equal(recorder.record({ x: 8, y: 9, velocityX: 2, active: true }, 110), true);
+assert.equal(recorder.record({ x: 10, y: 12, active: false }, 120), true);
+assert.equal(recorder.record({ x: 20, y: 22 }, 130), false);
+const recording = validateInputRecording(recorder.snapshot());
+assert.equal(recording.samples.length, 2);
+assert.equal(recording.durationMs, 20);
+
+const memoryStorage = new Map();
+const storage = {
+  getItem: (key) => memoryStorage.get(key) ?? null,
+  setItem: (key, value) => memoryStorage.set(key, value),
+  removeItem: (key) => memoryStorage.delete(key)
+};
+assert.equal(saveSettings(storage, { inkColor: "#ABCDEF", brushRadius: 100, renderMode: "vorticity", brushMode: "erase", adaptiveQuality: true }), true);
+assert.equal(JSON.parse(memoryStorage.get(SETTINGS_STORAGE_KEY)).schemaVersion, SETTINGS_SCHEMA_VERSION);
+const restoredSettings = loadSettings(storage);
+assert.equal(restoredSettings.inkColor, "#abcdef");
+assert.equal(restoredSettings.brushRadius, 64);
+assert.equal(restoredSettings.renderMode, "vorticity");
+assert.equal(restoredSettings.brushMode, "erase");
+assert.equal(restoredSettings.adaptiveQuality, true);
+assert.equal(clearSettings(storage), true);
+assert.equal(loadSettings(storage), null);
 
 const supportedAdapter = {
   limits: {
@@ -96,12 +137,14 @@ const report = createDiagnosticsReport({
   adapterLimits: supportedAdapter.limits,
   capabilities,
   features: ["timestamp-query"],
-  runtime
+  runtime,
+  qualityGovernor: governor.snapshot()
 });
 assert.equal(report.schemaVersion, DIAGNOSTICS_SCHEMA_VERSION);
 assert.equal(report.simulation.maxBacktraceDistance, 48);
 assert.equal(report.capabilities.featureTier, "timestamp-query");
 assert.equal(report.adapter.limits.maxStorageBufferBindingSize, 2_000_000);
+assert.equal(report.runtime.qualityGovernor.profile, "balanced");
 
 console.log("runtime-contract: passed");
 console.log("- capability policy, telemetry aggregation, and diagnostics schema validated");
