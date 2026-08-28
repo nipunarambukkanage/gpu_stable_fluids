@@ -34,6 +34,7 @@ import { createDiagnosticsReport } from "./runtime/diagnostics.js";
 import { createAdaptiveQualityGovernor } from "./runtime/adaptive-quality.js";
 import { createInputRecorder, validateInputRecording } from "./runtime/input-recorder.js";
 import { clearSettings, loadSettings, saveSettings } from "./runtime/settings-store.js";
+import { SCENE_PRESETS } from "./config/presets.js";
 import { createPerformanceHud } from "./ui/performance-hud.js";
 
 "use strict";
@@ -1601,15 +1602,8 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       updateControlReadouts();
     }
 
-    const scenePresets = Object.freeze({
-      studio: { color: "#48b7ff", brushRadius: 18, inkAmount: 1.8, velocityForce: 1, velocityDissipation: 0.08, inkDissipation: 0.025, vorticity: 0 },
-      soft: { color: "#a7ff83", brushRadius: 26, inkAmount: 1.15, velocityForce: 0.65, velocityDissipation: 0.16, inkDissipation: 0.04, vorticity: 0 },
-      "long-trails": { color: "#ffc857", brushRadius: 12, inkAmount: 1.4, velocityForce: 1.35, velocityDissipation: 0.025, inkDissipation: 0.006, vorticity: 0.35 },
-      turbulent: { color: "#ff5fb3", brushRadius: 20, inkAmount: 1.65, velocityForce: 1.45, velocityDissipation: 0.045, inkDissipation: 0.018, vorticity: 0.9 }
-    });
-
     function applyScenePreset() {
-      const preset = scenePresets[scenePresetInput.value];
+      const preset = SCENE_PRESETS[scenePresetInput.value];
       if (!preset) {
         return;
       }

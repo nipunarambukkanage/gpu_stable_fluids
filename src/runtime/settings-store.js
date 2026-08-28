@@ -1,4 +1,5 @@
 import { BRUSH_MODES, DEFAULT_BRUSH_MODE, DEFAULT_RENDER_MODE, DEFAULT_QUALITY_PROFILE, QUALITY_PROFILES, RENDER_MODES } from "../config/simulation.js";
+import { SCENE_PRESETS } from "../config/presets.js";
 
 export const SETTINGS_SCHEMA_VERSION = 1;
 export const SETTINGS_STORAGE_KEY = "gpu-stable-fluids.lab-settings.v1";
@@ -19,7 +20,6 @@ const DEFAULTS = Object.freeze({
   hudEnabled: false,
   adaptiveQuality: false
 });
-const SCENE_PRESETS = new Set(["studio", "soft", "long-trails", "turbulent"]);
 
 function clamp(value, minimum, maximum, fallback) {
   return Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback;
@@ -35,7 +35,7 @@ export function sanitizeSettings(input = {}) {
     velocityDissipation: clamp(Number(source.velocityDissipation), 0, 1, DEFAULTS.velocityDissipation),
     inkDissipation: clamp(Number(source.inkDissipation), 0, 1, DEFAULTS.inkDissipation),
     vorticityConfinement: clamp(Number(source.vorticityConfinement), 0, 1.5, DEFAULTS.vorticityConfinement),
-    scenePreset: typeof source.scenePreset === "string" && SCENE_PRESETS.has(source.scenePreset) ? source.scenePreset : DEFAULTS.scenePreset,
+    scenePreset: typeof source.scenePreset === "string" && SCENE_PRESETS[source.scenePreset] ? source.scenePreset : DEFAULTS.scenePreset,
     qualityProfile: QUALITY_PROFILES[source.qualityProfile] ? source.qualityProfile : DEFAULTS.qualityProfile,
     renderMode: RENDER_MODES[source.renderMode] ? source.renderMode : DEFAULT_RENDER_MODE,
     brushMode: BRUSH_MODES[source.brushMode] ? source.brushMode : DEFAULT_BRUSH_MODE,
