@@ -55,6 +55,9 @@
         <div class="status-line"><span>Submissions</span><span id="submissionStatus" class="status-value">0 queued</span></div>
         <div class="status-line"><span>GPU samples</span><span id="gpuSamplesStatus" class="status-value">0 samples</span></div>
         <div class="status-line"><span>Pressure</span><span id="pressureStatus" class="status-value">20 iterations</span></div>
+        <div class="status-line"><span>Quality governor</span><span id="adaptiveQualityStatus" class="status-value">Manual</span></div>
+        <div class="status-line"><span>Field view</span><span id="renderModeStatus" class="status-value">Density</span></div>
+        <div class="status-line"><span>Input macro</span><span id="recordingStatus" class="status-value">Ready</span></div>
         <div class="status-line"><span>Simulation time</span><span id="simulationTimeStatus" class="status-value">0.0 s</span></div>
         <div class="status-line"><span>Vortex force</span><span id="vorticityStatus" class="status-value">Off</span></div>
         <p id="statusMessage" class="status-message" role="status" aria-live="polite">Requesting a high-performance local GPU…</p>
@@ -119,11 +122,31 @@
           </select>
         </div>
         <div class="field">
+          <label class="field-label" for="renderMode"><span>Diagnostic field</span><output id="renderModeValue">Density</output></label>
+          <select id="renderMode" aria-describedby="renderModeValue">
+            <option value="density">Density · ink</option>
+            <option value="velocity">Velocity · magnitude</option>
+            <option value="pressure">Pressure · signed</option>
+            <option value="divergence">Divergence · residual</option>
+            <option value="vorticity">Vorticity · curl</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="brushMode"><span>Brush mode</span><output id="brushModeValue">Paint + velocity</output></label>
+          <select id="brushMode" aria-describedby="brushModeValue">
+            <option value="paint">Paint + velocity</option>
+            <option value="velocity">Velocity only</option>
+            <option value="erase">Erase</option>
+          </select>
+        </div>
+        <div class="field">
           <label class="field-label" for="vorticityForce"><span>Vortex confinement</span><output id="vorticityForceValue">Off</output></label>
           <input id="vorticityForce" type="range" min="0" max="1.5" step="0.05" value="0" aria-describedby="vorticityForceValue">
         </div>
         <label class="check-field" for="tracerToggle"><span>GPU tracer particles</span><input id="tracerToggle" type="checkbox" checked></label>
         <label class="check-field" for="hudToggle"><span>Performance HUD</span><input id="hudToggle" type="checkbox"></label>
+        <label class="check-field" for="adaptiveQualityToggle"><span>Adaptive pressure quality</span><input id="adaptiveQualityToggle" type="checkbox"></label>
+        <label class="check-field" for="rememberToggle"><span>Remember lab settings</span><input id="rememberToggle" type="checkbox"></label>
       </fieldset>
 
       <div class="button-row">
@@ -134,7 +157,12 @@
         <button id="demoButton" type="button" disabled>Auto demo</button>
         <button id="snapshotButton" type="button" disabled>Save PNG</button>
       </div>
+      <div class="tool-row">
+        <button id="recordButton" type="button" disabled>Record strokes</button>
+        <button id="replayButton" type="button" disabled>Replay last</button>
+      </div>
       <button id="diagnosticsButton" class="diagnostics-button" type="button" disabled>Save diagnostics JSON</button>
+      <button id="forgetSettingsButton" class="diagnostics-button secondary-button" type="button">Forget saved settings</button>
       <p class="guide"><strong>Drag</strong> on the canvas to paint. Direction creates flow; slow strokes make calm trails. Space pauses, C clears, and H hides controls.</p>
     </aside>
   </main>
