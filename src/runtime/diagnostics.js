@@ -20,7 +20,8 @@ export function createDiagnosticsReport({
   adapterLimits = {},
   capabilities = null,
   features = [],
-  runtime = {}
+  runtime = {},
+  qualityGovernor = null
 }) {
   return {
     schemaVersion: DIAGNOSTICS_SCHEMA_VERSION,
@@ -51,6 +52,9 @@ export function createDiagnosticsReport({
       limits: supportedAdapterLimits(adapterLimits)
     },
     features: [...features],
-    runtime: { ...runtime }
+    runtime: {
+      ...runtime,
+      qualityGovernor: qualityGovernor ? { ...qualityGovernor } : null
+    }
   };
 }

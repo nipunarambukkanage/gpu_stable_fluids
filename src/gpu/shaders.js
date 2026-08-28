@@ -63,11 +63,20 @@ export const splatShaderCode = `
           let radialFalloff = exp(-(distanceToStroke * distanceToStroke) / (2.0 * radius * radius));
           let injectedVelocity = params.injectedVelocityForce.xy * params.injectedVelocityForce.z * radialFalloff;
           let injectedInk = params.inkColorExposure.xyz * params.injectedVelocityForce.w * radialFalloff;
-          velocity += injectedVelocity;
-          density = vec4<f32>(
-            clamp(density.rgb + injectedInk, vec3<f32>(0.0), vec3<f32>(12.0)),
-            clamp(density.a + params.injectedVelocityForce.w * radialFalloff, 0.0, 12.0)
-          );
+          let brushMode = params.vortexSettings.y;
+          if (brushMode < 0.5) {
+            velocity += injectedVelocity;
+            density = vec4<f32>(
+              clamp(density.rgb + injectedInk, vec3<f32>(0.0), vec3<f32>(12.0)),
+              clamp(density.a + params.injectedVelocityForce.w * radialFalloff, 0.0, 12.0)
+            );
+          } else if (brushMode < 1.5) {
+            velocity += injectedVelocity;
+          } else {
+            let eraseFactor = clamp(1.0 - radialFalloff * 1.35, 0.0, 1.0);
+            velocity *= eraseFactor;
+            density *= eraseFactor;
+          }
         }
 
         velocity = clamp(velocity, vec2<f32>(-4096.0), vec2<f32>(4096.0));
@@ -632,17 +641,58 @@ export const renderVertexShaderCode = `
       }
     `;
 export const renderFragmentShaderCode = `
+      struct SimParams {
+        timeDtDissipation: vec4<f32>,
+        gridPointer: vec4<f32>,
+        strokeStart: vec4<f32>,
+        strokeEnd: vec4<f32>,
+        injectedVelocityForce: vec4<f32>,
+        inkColorExposure: vec4<f32>,
+        vortexSettings: vec4<f32>,
+      };
+
       @group(0) @binding(0) var densityTexture: texture_2d<f32>;
-      @group(0) @binding(1) var linearSampler: sampler;
+      @group(0) @binding(1) var velocityTexture: texture_2d<f32>;
+      @group(0) @binding(2) var pressureTexture: texture_2d<f32>;
+      @group(0) @binding(3) var divergenceTexture: texture_2d<f32>;
+      @group(0) @binding(4) var vorticityTexture: texture_2d<f32>;
+      @group(0) @binding(5) var linearSampler: sampler;
+      @group(0) @binding(6) var<uniform> params: SimParams;
+
+      fn signedFieldColor(value: f32, scale: f32) -> vec3<f32> {
+        let normalized = clamp(value * scale, -1.0, 1.0);
+        let positive = max(normalized, 0.0);
+        let negative = max(-normalized, 0.0);
+        return vec3<f32>(0.16 + positive * 0.84, 0.08 + (1.0 - abs(normalized)) * 0.12, 0.22 + negative * 0.78);
+      }
 
       @fragment
       fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         let density = max(textureSample(densityTexture, linearSampler, uv).rgb, vec3<f32>(0.0));
         let intensity = max(max(density.r, density.g), density.b);
         let chroma = density / max(intensity, 0.0001);
-        let mappedIntensity = 1.0 - exp(-intensity * 0.72);
-        let displayColor = chroma * mappedIntensity;
-        let gammaCorrected = pow(displayColor, vec3<f32>(1.0 / 2.2));
+        let coordinate = clamp(vec2<i32>(uv * vec2<f32>(params.gridPointer.xy)), vec2<i32>(0), vec2<i32>(i32(params.gridPointer.x) - 1, i32(params.gridPointer.y) - 1));
+        let velocity = textureLoad(velocityTexture, coordinate, 0).xy;
+        let pressure = textureLoad(pressureTexture, coordinate, 0).x;
+        let divergence = textureLoad(divergenceTexture, coordinate, 0).x;
+        let vorticity = textureLoad(vorticityTexture, coordinate, 0).x;
+        var displayColor = chroma * (1.0 - exp(-intensity * params.inkColorExposure.w));
+        if (params.vortexSettings.z > 0.5) {
+          let mode = i32(params.vortexSettings.w);
+          if (mode == 1) {
+            let speed = clamp(length(velocity) * 0.045, 0.0, 1.0);
+            displayColor = vec3<f32>(speed * 0.9, speed * 0.28 + 0.04, 1.0 - speed * 0.62);
+          } else if (mode == 2) {
+            displayColor = signedFieldColor(pressure, 0.08);
+          } else if (mode == 3) {
+            displayColor = signedFieldColor(divergence, 0.65);
+          } else if (mode == 4) {
+            let curl = clamp(abs(vorticity) * 0.18, 0.0, 1.0);
+            displayColor = vec3<f32>(curl * 0.95, 0.12 + curl * 0.48, 0.32 + (1.0 - curl) * 0.68);
+          }
+        }
+        let mappedDisplay = clamp(displayColor, vec3<f32>(0.0), vec3<f32>(1.0));
+        let gammaCorrected = pow(mappedDisplay, vec3<f32>(1.0 / 2.2));
         return vec4<f32>(gammaCorrected, 1.0);
       }
     `;
