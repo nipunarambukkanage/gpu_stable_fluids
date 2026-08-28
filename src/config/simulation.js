@@ -14,6 +14,20 @@ export const QUALITY_PROFILES = Object.freeze({
   cinematic: Object.freeze({ label: "Cinematic", pressureIterations: 36, description: "Higher pressure quality for clean dense curls." })
 });
 export const DEFAULT_QUALITY_PROFILE = "balanced";
+export const RENDER_MODES = Object.freeze({
+  density: Object.freeze({ label: "Density", description: "Tonemapped ink density field." }),
+  velocity: Object.freeze({ label: "Velocity", description: "Velocity magnitude and direction diagnostics." }),
+  pressure: Object.freeze({ label: "Pressure", description: "Signed pressure projection field." }),
+  divergence: Object.freeze({ label: "Divergence", description: "Residual compressibility diagnostic." }),
+  vorticity: Object.freeze({ label: "Vorticity", description: "Curl magnitude diagnostic." })
+});
+export const DEFAULT_RENDER_MODE = "density";
+export const BRUSH_MODES = Object.freeze({
+  paint: Object.freeze({ label: "Paint + velocity", value: 0, description: "Inject ink and momentum." }),
+  velocity: Object.freeze({ label: "Velocity only", value: 1, description: "Inject momentum without adding ink." }),
+  erase: Object.freeze({ label: "Erase", value: 2, description: "Dampen ink and momentum under the brush." })
+});
+export const DEFAULT_BRUSH_MODE = "paint";
 export const MAX_FRAME_DELTA = 1 / 30;
 export const MAX_BACKTRACE_DISTANCE = 48;
 export const MAX_POINTER_VELOCITY = 1800;

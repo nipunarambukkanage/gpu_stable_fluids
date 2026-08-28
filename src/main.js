@@ -19,6 +19,10 @@ import {
   INDIRECT_ARGS_SIZE,
   UNIFORM_FLOAT_COUNT,
   UNIFORM_BUFFER_SIZE,
+  BRUSH_MODES,
+  DEFAULT_BRUSH_MODE,
+  DEFAULT_RENDER_MODE,
+  RENDER_MODES,
   createInitialParticleData
 } from "./config/simulation.js";
 import { createGpuTimer, destroyGpuTimer, readGpuTimestamp } from "./gpu/timestamp-profiler.js";
@@ -27,6 +31,9 @@ import { createGpuPipelineBatch } from "./gpu/pipeline-factory.js";
 import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRuntimeSubmission, resetRuntimeTelemetry, snapshotRuntimeTelemetry } from "./gpu/telemetry.js";
 import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
 import { createDiagnosticsReport } from "./runtime/diagnostics.js";
+import { createAdaptiveQualityGovernor } from "./runtime/adaptive-quality.js";
+import { createInputRecorder, validateInputRecording } from "./runtime/input-recorder.js";
+import { clearSettings, loadSettings, saveSettings } from "./runtime/settings-store.js";
 import { createPerformanceHud } from "./ui/performance-hud.js";
 
 "use strict";
@@ -72,6 +79,9 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     const framePacingStatus = document.getElementById("framePacingStatus");
     const submissionStatus = document.getElementById("submissionStatus");
     const gpuSamplesStatus = document.getElementById("gpuSamplesStatus");
+    const adaptiveQualityStatus = document.getElementById("adaptiveQualityStatus");
+    const renderModeStatus = document.getElementById("renderModeStatus");
+    const recordingStatus = document.getElementById("recordingStatus");
     const vorticityStatus = document.getElementById("vorticityStatus");
     const scenePresetInput = document.getElementById("scenePreset");
     const scenePresetValue = document.getElementById("scenePresetValue");
@@ -83,7 +93,16 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     const diagnosticsButton = document.getElementById("diagnosticsButton");
     const qualityProfileInput = document.getElementById("qualityProfile");
     const qualityProfileValue = document.getElementById("qualityProfileValue");
+    const renderModeInput = document.getElementById("renderMode");
+    const renderModeValue = document.getElementById("renderModeValue");
+    const brushModeInput = document.getElementById("brushMode");
+    const brushModeValue = document.getElementById("brushModeValue");
     const hudToggle = document.getElementById("hudToggle");
+    const adaptiveQualityToggle = document.getElementById("adaptiveQualityToggle");
+    const rememberToggle = document.getElementById("rememberToggle");
+    const recordButton = document.getElementById("recordButton");
+    const replayButton = document.getElementById("replayButton");
+    const forgetSettingsButton = document.getElementById("forgetSettingsButton");
 
     // Uniform layout: each vec4 occupies one 16-byte slot.
     // 0..3: time, delta time, velocity dissipation, ink dissipation.
@@ -92,7 +111,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     // 12..15: stroke end x/y, reserved, reserved.
     // 16..19: injected velocity x/y, velocity-force multiplier, ink amount.
     // 20..23: ink color RGB, render exposure.
-    // 24..27: optional vorticity confinement strength, remaining diagnostic slots.
+    // 24..27: vorticity strength, brush mode, diagnostic-view flag, diagnostic-view index.
     const uniformData = new Float32Array(UNIFORM_FLOAT_COUNT);
     const simulationSettings = {
       brushRadius: 18,
@@ -103,7 +122,9 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       vorticityConfinement: 0,
       exposure: 0.72,
       qualityProfile: DEFAULT_QUALITY_PROFILE,
-      pressureIterations: QUALITY_PROFILES[DEFAULT_QUALITY_PROFILE].pressureIterations
+      pressureIterations: QUALITY_PROFILES[DEFAULT_QUALITY_PROFILE].pressureIterations,
+      renderMode: DEFAULT_RENDER_MODE,
+      brushMode: DEFAULT_BRUSH_MODE
     };
     const zeroTextureData = {
       velocity: new Uint8Array(GRID_WIDTH * GRID_HEIGHT * 8),
@@ -133,6 +154,14 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       fpsFrames: 0,
       interfaceAccumulator: 0,
       telemetry: createRuntimeTelemetry(performance.now()),
+      qualityGovernor: createAdaptiveQualityGovernor(),
+      inputRecorder: createInputRecorder(),
+      replay: {
+        active: false,
+        elapsedMs: 0,
+        cursor: 0,
+        recording: null
+      },
       resizeObserver: null,
       presentationWidth: 0,
       presentationHeight: 0,
@@ -213,10 +242,17 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       clearButton.disabled = disabled;
       demoButton.disabled = disabled;
       snapshotButton.disabled = disabled;
+      recordButton.disabled = disabled;
+      replayButton.disabled = disabled || !app.replay.recording;
       diagnosticsButton.disabled = disabled;
       qualityProfileInput.disabled = disabled;
+      renderModeInput.disabled = disabled;
+      brushModeInput.disabled = disabled;
       hudToggle.disabled = disabled;
+      adaptiveQualityToggle.disabled = disabled;
+      rememberToggle.disabled = disabled;
       canvas.style.cursor = disabled ? "not-allowed" : "crosshair";
+      qualityProfileInput.disabled = disabled || adaptiveQualityToggle.checked;
       updatePauseButton();
     }
 
@@ -261,6 +297,14 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       gpuSamplesStatus.title = telemetry.lastGpuMs === null
         ? "Optional timestamp-query samples have not completed yet."
         : `Last GPU frame: ${telemetry.lastGpuMs.toFixed(2)} ms; EMA: ${telemetry.averageGpuMs.toFixed(2)} ms.`;
+      const governor = app.qualityGovernor.snapshot();
+      adaptiveQualityStatus.textContent = adaptiveQualityToggle.checked
+        ? `Auto · ${governor.pressureIterations}`
+        : "Manual";
+      adaptiveQualityStatus.title = adaptiveQualityToggle.checked
+        ? `Target 16.7 ms; current ${QUALITY_PROFILES[governor.profile].label}; last GPU sample ${governor.lastGpuMs === null ? "pending" : `${governor.lastGpuMs.toFixed(2)} ms`}.`
+        : "Manual pressure profile selection is active.";
+      renderModeStatus.textContent = RENDER_MODES[simulationSettings.renderMode]?.label || "Density";
       performanceHud.update({
         fps: fpsStatus.textContent,
         telemetry,
@@ -394,7 +438,12 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         label: "Render bind group layout",
         entries: [
           { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
-          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+          { binding: 5, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+          { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }
         ]
       });
       const particleRender = device.createBindGroupLayout({
@@ -629,14 +678,19 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
           { binding: 3, resource: { buffer: particleBuffers[1 - particleIndex] } }
         ]
       })));
-      const render = [0, 1].map((densityIndex) => device.createBindGroup({
-        label: `Render bind group ${densityIndex}`,
+      const render = [0, 1].map((densityIndex) => [0, 1].map((velocityIndex) => [0, 1].map((pressureIndex) => device.createBindGroup({
+        label: `Render bind group d${densityIndex} v${velocityIndex} p${pressureIndex}`,
         layout: layouts.render,
         entries: [
           { binding: 0, resource: views.density[densityIndex] },
-          { binding: 1, resource: sampler }
+          { binding: 1, resource: views.velocity[velocityIndex] },
+          { binding: 2, resource: views.pressure[pressureIndex] },
+          { binding: 3, resource: views.divergence },
+          { binding: 4, resource: views.vorticity },
+          { binding: 5, resource: sampler },
+          { binding: 6, resource: { buffer: uniformBuffer } }
         ]
-      }));
+      }))));
       const particleRender = [0, 1].map((particleIndex) => device.createBindGroup({
         label: `GPU tracer render bind group ${particleIndex}`,
         layout: layouts.particleRender,
@@ -695,7 +749,8 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         bindGroups,
         velocityIndex: 0,
         densityIndex: 0,
-        pressureIndex: 0
+        pressureIndex: 0,
+        particleIndex: 0
       };
     }
 
@@ -856,6 +911,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
 
     // 10. Simulation passes
     const inkColorComponents = new Float32Array(3);
+    const renderModeIndices = Object.freeze({ density: 0, velocity: 1, pressure: 2, divergence: 3, vorticity: 4 });
 
     function clampNumber(value, minimum, maximum) {
       return Math.min(maximum, Math.max(minimum, value));
@@ -868,9 +924,46 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       inkColorComponents[2] = Number.parseInt(hex.slice(5, 7), 16) / 255;
     }
 
+    function updateReplayPointer(deltaTime) {
+      const replay = app.replay;
+      if (!replay.active || !replay.recording?.samples.length) {
+        return false;
+      }
+      replay.elapsedMs += deltaTime * 1000;
+      const samples = replay.recording.samples;
+      while (replay.cursor < samples.length - 1 && samples[replay.cursor + 1].timeMs <= replay.elapsedMs) {
+        replay.cursor += 1;
+      }
+      const sample = samples[replay.cursor];
+      const pointer = app.pointer;
+      if (!pointer.hasPosition) {
+        pointer.segmentStartX = sample.x;
+        pointer.segmentStartY = sample.y;
+        pointer.hasPosition = true;
+      } else {
+        pointer.segmentStartX = pointer.currentX;
+        pointer.segmentStartY = pointer.currentY;
+      }
+      pointer.currentX = clampNumber(sample.x, 0.5, GRID_WIDTH - 0.5);
+      pointer.currentY = clampNumber(sample.y, 0.5, GRID_HEIGHT - 0.5);
+      pointer.velocityX = clampNumber(sample.velocityX, -MAX_POINTER_VELOCITY, MAX_POINTER_VELOCITY);
+      pointer.velocityY = clampNumber(sample.velocityY, -MAX_POINTER_VELOCITY, MAX_POINTER_VELOCITY);
+      pointer.active = sample.active;
+      pointer.hasPendingMotion = true;
+      if (replay.elapsedMs > replay.recording.durationMs + 100) {
+        replay.active = false;
+        resetPointerState();
+        setStatus("Stroke macro replay complete. The simulation remains GPU-resident.", "good");
+      }
+      updateRecordingStatus();
+      return true;
+    }
+
     function updateUniformBuffer(deltaTime) {
       const resources = app.resources;
-      updateDemoPointer(deltaTime);
+      if (!updateReplayPointer(deltaTime)) {
+        updateDemoPointer(deltaTime);
+      }
       const pointer = app.pointer;
       const hasPosition = pointer.hasPosition;
       const startX = hasPosition ? pointer.segmentStartX : GRID_WIDTH * 0.5;
@@ -905,9 +998,9 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       uniformData[22] = inkColorComponents[2];
       uniformData[23] = simulationSettings.exposure;
       uniformData[24] = simulationSettings.vorticityConfinement;
-      uniformData[25] = 0;
-      uniformData[26] = 0;
-      uniformData[27] = 0;
+      uniformData[25] = BRUSH_MODES[simulationSettings.brushMode]?.value ?? BRUSH_MODES[DEFAULT_BRUSH_MODE].value;
+      uniformData[26] = simulationSettings.renderMode === DEFAULT_RENDER_MODE ? 0 : 1;
+      uniformData[27] = renderModeIndices[simulationSettings.renderMode] ?? renderModeIndices[DEFAULT_RENDER_MODE];
 
       app.device.queue.writeBuffer(resources.uniformBuffer, 0, uniformData);
 
@@ -938,7 +1031,10 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         }]
       });
       renderPass.setPipeline(app.resources.pipelines.render);
-      renderPass.setBindGroup(0, app.resources.bindGroups.render[app.resources.densityIndex]);
+      renderPass.setBindGroup(
+        0,
+        app.resources.bindGroups.render[app.resources.densityIndex][app.resources.velocityIndex][app.resources.pressureIndex]
+      );
       renderPass.draw(6, 1, 0, 0);
       if (app.particlesEnabled) {
         renderPass.setPipeline(app.resources.pipelines.particleRender);
@@ -1031,6 +1127,13 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       if (shouldSampleGpuTime) {
         readGpuTimestamp(gpuTimer, app, gpuTimeStatus, (milliseconds) => {
           recordGpuSample(app.telemetry, milliseconds);
+          const qualityChange = adaptiveQualityToggle.checked
+            ? app.qualityGovernor.observe(milliseconds, performance.now())
+            : null;
+          if (qualityChange) {
+            applyQualityProfile(qualityChange.profile, { fromGovernor: true });
+            setStatus(`Adaptive quality shifted to ${QUALITY_PROFILES[qualityChange.profile].label} (${qualityChange.reason}).`, "warning");
+          }
           updateTelemetryReadouts();
         });
       }
@@ -1141,7 +1244,11 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     }
 
     function getPointerTimestamp(event) {
-      return Number.isFinite(event.timeStamp) && event.timeStamp > 0 ? event.timeStamp : performance.now();
+      const now = performance.now();
+      const eventTime = event.timeStamp;
+      // Some browsers expose epoch-based event timestamps while others use the
+      // performance time origin. Reject a timestamp from a different clock.
+      return Number.isFinite(eventTime) && eventTime > 0 && Math.abs(eventTime - now) < 60_000 ? eventTime : now;
     }
 
     function pointerToSimulationPosition(event) {
@@ -1194,6 +1301,16 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         pointer.currentY = position.y;
       }
       pointer.lastSampleTime = sampleTime;
+      if (app.inputRecorder.isRecording()) {
+        app.inputRecorder.record({
+          x: pointer.currentX,
+          y: pointer.currentY,
+          velocityX: pointer.velocityX,
+          velocityY: pointer.velocityY,
+          active: pointer.active
+        }, sampleTime);
+        updateRecordingStatus();
+      }
     }
 
     function getPointerSamples(event) {
@@ -1214,6 +1331,11 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         app.demo.active = false;
         resetPointerState();
         demoButton.textContent = "Auto demo";
+      }
+      if (app.replay.active) {
+        app.replay.active = false;
+        resetPointerState();
+        updateRecordingStatus();
       }
       if (app.pointer.active) {
         return;
@@ -1247,6 +1369,15 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       event.preventDefault();
       const lastSample = getPointerSamples(event).at(-1) || event;
       processPointerSample(lastSample, false);
+      if (app.inputRecorder.isRecording()) {
+        app.inputRecorder.record({
+          x: app.pointer.currentX,
+          y: app.pointer.currentY,
+          velocityX: 0,
+          velocityY: 0,
+          active: false
+        }, getPointerTimestamp(lastSample));
+      }
       try {
         if (canvas.hasPointerCapture(event.pointerId)) {
           canvas.releasePointerCapture(event.pointerId);
@@ -1263,6 +1394,82 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       }
     }
 
+    function collectPersistedSettings() {
+      return {
+        inkColor: inkColorInput.value,
+        brushRadius: Number(brushRadiusInput.value),
+        velocityForce: Number(velocityForceInput.value),
+        inkAmount: Number(inkAmountInput.value),
+        velocityDissipation: Number(velocityDissipationInput.value),
+        inkDissipation: Number(inkDissipationInput.value),
+        vorticityConfinement: Number(vorticityForceInput.value),
+        scenePreset: scenePresetInput.value,
+        qualityProfile: simulationSettings.qualityProfile,
+        renderMode: simulationSettings.renderMode,
+        brushMode: simulationSettings.brushMode,
+        tracersEnabled: tracerToggle.checked,
+        hudEnabled: hudToggle.checked,
+        adaptiveQuality: adaptiveQualityToggle.checked
+      };
+    }
+
+    function getSettingsStorage() {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    }
+
+    function persistSettingsIfEnabled() {
+      if (!rememberToggle.checked) {
+        return;
+      }
+      saveSettings(getSettingsStorage(), collectPersistedSettings());
+    }
+
+    function applyQualityProfile(profileName, { fromGovernor = false } = {}) {
+      if (!QUALITY_PROFILES[profileName]) {
+        return false;
+      }
+      simulationSettings.qualityProfile = profileName;
+      simulationSettings.pressureIterations = QUALITY_PROFILES[profileName].pressureIterations;
+      qualityProfileInput.value = profileName;
+      qualityProfileValue.textContent = QUALITY_PROFILES[profileName].label;
+      qualityProfileInput.title = QUALITY_PROFILES[profileName].description;
+      pressureStatus.textContent = `${simulationSettings.pressureIterations} iterations`;
+      if (!fromGovernor) {
+        app.qualityGovernor.setProfile(profileName, performance.now());
+      }
+      persistSettingsIfEnabled();
+      return true;
+    }
+
+    function restoreStoredSettings() {
+      const stored = loadSettings(getSettingsStorage());
+      if (!stored) {
+        return;
+      }
+      inkColorInput.value = stored.inkColor;
+      brushRadiusInput.value = String(stored.brushRadius);
+      velocityForceInput.value = String(stored.velocityForce);
+      inkAmountInput.value = String(stored.inkAmount);
+      velocityDissipationInput.value = String(stored.velocityDissipation);
+      inkDissipationInput.value = String(stored.inkDissipation);
+      vorticityForceInput.value = String(stored.vorticityConfinement);
+      scenePresetInput.value = stored.scenePreset;
+      qualityProfileInput.value = stored.qualityProfile;
+      renderModeInput.value = stored.renderMode;
+      brushModeInput.value = stored.brushMode;
+      simulationSettings.qualityProfile = stored.qualityProfile;
+      simulationSettings.pressureIterations = QUALITY_PROFILES[stored.qualityProfile].pressureIterations;
+      app.qualityGovernor.setProfile(stored.qualityProfile, performance.now());
+      tracerToggle.checked = stored.tracersEnabled;
+      hudToggle.checked = stored.hudEnabled;
+      adaptiveQualityToggle.checked = stored.adaptiveQuality;
+      rememberToggle.checked = true;
+    }
+
     function updateControlReadouts() {
       simulationSettings.brushRadius = Number.parseFloat(brushRadiusInput.value);
       simulationSettings.velocityForce = Number.parseFloat(velocityForceInput.value);
@@ -1270,9 +1477,13 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       simulationSettings.velocityDissipation = Number.parseFloat(velocityDissipationInput.value);
       simulationSettings.inkDissipation = Number.parseFloat(inkDissipationInput.value);
       simulationSettings.vorticityConfinement = Number.parseFloat(vorticityForceInput.value);
-      const selectedProfile = QUALITY_PROFILES[qualityProfileInput.value] || QUALITY_PROFILES[DEFAULT_QUALITY_PROFILE];
-      simulationSettings.qualityProfile = QUALITY_PROFILES[qualityProfileInput.value] ? qualityProfileInput.value : DEFAULT_QUALITY_PROFILE;
-      simulationSettings.pressureIterations = selectedProfile.pressureIterations;
+      simulationSettings.renderMode = RENDER_MODES[renderModeInput.value] ? renderModeInput.value : DEFAULT_RENDER_MODE;
+      simulationSettings.brushMode = BRUSH_MODES[brushModeInput.value] ? brushModeInput.value : DEFAULT_BRUSH_MODE;
+      if (!adaptiveQualityToggle.checked) {
+        applyQualityProfile(QUALITY_PROFILES[qualityProfileInput.value] ? qualityProfileInput.value : DEFAULT_QUALITY_PROFILE);
+      } else {
+        applyQualityProfile(simulationSettings.qualityProfile, { fromGovernor: true });
+      }
       refreshInkColorComponents();
       const selectedColor = inkColorInput.value.toLowerCase();
       for (const presetButton of colorPresetButtons) {
@@ -1287,10 +1498,13 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       vorticityForceValue.textContent = simulationSettings.vorticityConfinement > 0 ? `${simulationSettings.vorticityConfinement.toFixed(2)}×` : "Off";
       vorticityStatus.textContent = simulationSettings.vorticityConfinement > 0 ? `${simulationSettings.vorticityConfinement.toFixed(2)}×` : "Off";
       scenePresetValue.textContent = scenePresetInput.options[scenePresetInput.selectedIndex].textContent;
-      qualityProfileInput.value = simulationSettings.qualityProfile;
-      qualityProfileValue.textContent = selectedProfile.label;
-      qualityProfileInput.title = selectedProfile.description;
+      renderModeValue.textContent = RENDER_MODES[simulationSettings.renderMode].label;
+      renderModeInput.title = RENDER_MODES[simulationSettings.renderMode].description;
+      brushModeValue.textContent = BRUSH_MODES[simulationSettings.brushMode].label;
+      brushModeInput.title = BRUSH_MODES[simulationSettings.brushMode].description;
       pressureStatus.textContent = `${simulationSettings.pressureIterations} iterations`;
+      qualityProfileInput.disabled = !app.available || adaptiveQualityToggle.checked;
+      persistSettingsIfEnabled();
     }
 
     function updateTracerState() {
@@ -1303,11 +1517,82 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       tracerStatus.title = app.particlesEnabled
         ? `${PARTICLE_COUNT.toLocaleString()} GPU-resident Lagrangian tracers are advected in a dedicated compute pass.`
         : "GPU tracer compute and rendering are disabled.";
+      persistSettingsIfEnabled();
     }
 
     function updateHudState() {
       performanceHud.setVisible(hudToggle.checked);
       updateTelemetryReadouts();
+      persistSettingsIfEnabled();
+    }
+
+    function updateAdaptiveQualityState() {
+      if (adaptiveQualityToggle.checked) {
+        app.qualityGovernor.setProfile(simulationSettings.qualityProfile, performance.now());
+        setStatus("Adaptive quality is monitoring completed GPU timestamps.", "good");
+      } else {
+        applyQualityProfile(qualityProfileInput.value || DEFAULT_QUALITY_PROFILE);
+        setStatus("Manual pressure quality is active.", "good");
+      }
+      qualityProfileInput.disabled = !app.available || adaptiveQualityToggle.checked;
+      updateTelemetryReadouts();
+      persistSettingsIfEnabled();
+    }
+
+    function updateRecordingStatus() {
+      const recorder = app.inputRecorder;
+      if (recorder.isRecording()) {
+        const count = recorder.snapshot().samples.length;
+        recordingStatus.textContent = `Recording · ${count.toLocaleString()}`;
+        recordButton.textContent = "Stop recording";
+      } else if (app.replay.active) {
+        recordingStatus.textContent = "Replaying";
+        recordButton.textContent = "Record strokes";
+      } else if (app.replay.recording) {
+        recordingStatus.textContent = `${app.replay.recording.samples.length.toLocaleString()} samples ready`;
+        recordButton.textContent = "Record strokes";
+      } else {
+        recordingStatus.textContent = "Ready";
+        recordButton.textContent = "Record strokes";
+      }
+      replayButton.disabled = !app.available || !app.replay.recording || app.inputRecorder.isRecording();
+    }
+
+    function toggleRecording() {
+      if (!app.available) {
+        return;
+      }
+      if (app.inputRecorder.isRecording()) {
+        app.inputRecorder.stop();
+        const recording = validateInputRecording(app.inputRecorder.snapshot());
+        app.replay.recording = recording?.samples.length ? recording : null;
+        setStatus(app.replay.recording ? "Stroke macro captured. Replay it without additional CPU/GPU state transfers." : "No stroke samples were captured.", "good");
+      } else {
+        app.replay.active = false;
+        app.inputRecorder.start(performance.now());
+        setStatus("Recording pointer strokes. Paint one or more gestures, then stop recording.", "good");
+      }
+      updateRecordingStatus();
+    }
+
+    function replayRecording() {
+      const recording = validateInputRecording(app.replay.recording);
+      if (!app.available || !recording) {
+        setStatus("Record a stroke macro before replaying it.", "warning");
+        return;
+      }
+      app.replay.recording = recording;
+      app.replay.active = true;
+      app.replay.elapsedMs = 0;
+      app.replay.cursor = 0;
+      app.demo.active = false;
+      resetPointerState();
+      demoButton.textContent = "Auto demo";
+      setStatus("Replaying the captured stroke macro on the GPU-resident simulation.", "good");
+      if (app.paused) {
+        togglePause();
+      }
+      updateRecordingStatus();
     }
 
     function selectInkPreset(event) {
@@ -1387,6 +1672,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         setStatus("Demo stopped. Drag anywhere on the canvas to take over.", "good");
         return;
       }
+      app.replay.active = false;
       resetPointerState();
       app.demo.active = true;
       app.pointer.active = true;
@@ -1432,7 +1718,11 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         adapterLimits: app.adapter.limits || {},
         capabilities: app.capabilities,
         features: app.device ? Array.from(app.device.features || []) : [],
-        runtime: snapshotRuntimeTelemetry(app.telemetry, performance.now())
+        runtime: snapshotRuntimeTelemetry(app.telemetry, performance.now()),
+        qualityGovernor: {
+          ...app.qualityGovernor.snapshot(),
+          enabled: adaptiveQualityToggle.checked
+        }
       });
       const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
       const downloadUrl = URL.createObjectURL(blob);
@@ -1470,6 +1760,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         demoButton.textContent = "Auto demo";
         resetPointerState();
       }
+      app.replay.active = false;
       clearSimulationTextures();
       setStatus("Simulation cleared. Drag to paint a new field.", "good");
       renderCurrentDensity();
@@ -1553,16 +1844,28 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     }
 
     function setupInteractionAndUi() {
+      restoreStoredSettings();
       updateControlReadouts();
       updateTracerState();
       updateHudState();
-      for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput, vorticityForceInput]) {
+      updateRecordingStatus();
+      for (const input of [inkColorInput, brushRadiusInput, velocityForceInput, inkAmountInput, velocityDissipationInput, inkDissipationInput, vorticityForceInput, renderModeInput, brushModeInput]) {
         input.addEventListener("input", updateControlReadouts);
       }
       scenePresetInput.addEventListener("change", applyScenePreset);
       qualityProfileInput.addEventListener("change", updateControlReadouts);
+      adaptiveQualityToggle.addEventListener("change", updateAdaptiveQualityState);
       tracerToggle.addEventListener("change", updateTracerState);
       hudToggle.addEventListener("change", updateHudState);
+      rememberToggle.addEventListener("change", () => {
+        if (rememberToggle.checked) {
+          persistSettingsIfEnabled();
+          setStatus("Lab settings will be restored on the next visit.", "good");
+        } else {
+          clearSettings(getSettingsStorage());
+          setStatus("Saved lab settings were removed.", "good");
+        }
+      });
       for (const presetButton of colorPresetButtons) {
         presetButton.addEventListener("click", selectInkPreset);
       }
@@ -1570,7 +1873,14 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       clearButton.addEventListener("click", clearSimulation);
       demoButton.addEventListener("click", toggleDemo);
       snapshotButton.addEventListener("click", saveSnapshot);
+      recordButton.addEventListener("click", toggleRecording);
+      replayButton.addEventListener("click", replayRecording);
       diagnosticsButton.addEventListener("click", saveDiagnostics);
+      forgetSettingsButton.addEventListener("click", () => {
+        clearSettings(getSettingsStorage());
+        rememberToggle.checked = false;
+        setStatus("Saved lab settings forgotten.", "good");
+      });
       retryGpuButton.addEventListener("click", initializeGpu);
       hideControlsButton.addEventListener("click", () => setControlsVisible(false));
       panelToggle.addEventListener("click", () => setControlsVisible(true));

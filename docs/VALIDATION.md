@@ -73,10 +73,15 @@ Confirm that the SPH run reports the uniform neighbor-grid dimensions and a neig
 15. Use `Save diagnostics JSON` and confirm the downloaded report contains a schema version, active settings, adapter limits, submission count, and local frame/GPU metrics.
 16. Change the quality profile through Performance, Balanced, and Cinematic. The pressure status and HUD should report 8, 20, and 36 iterations without rebuilding GPU resources.
 17. Enable the Performance HUD and confirm its CPU, GPU, submission, pressure, tracer, adapter, and feature-tier values update while simulation continues.
-18. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
-19. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
-20. Hide and show the document, then resume. No large burst or instability should appear after returning.
-21. Inspect the browser console. Normal operation should produce no WebGPU validation error.
+18. Switch the diagnostic field through Density, Velocity, Pressure, Divergence, and Vorticity. Each view should update without a resource rebuild or console validation error.
+19. Test Paint + velocity, Velocity only, and Erase brush modes. Velocity-only should not add new color; erase should damp the stroke region.
+20. Enable Adaptive pressure quality. On adapters with timestamp-query, repeated high/low GPU samples should change the profile only after hysteresis and cooldown; without timestamps the control should remain safe and inactive.
+21. Record strokes, paint one or more gestures, stop, then use Replay last. The same gesture should be reproduced and the status should report completion.
+22. Enable Remember lab settings, change controls, reload the page, and confirm they restore. Use Forget saved settings and confirm a subsequent load returns defaults.
+23. Resize the window and test a narrow viewport. The simulation grid must remain 512 × 512 while the presentation canvas follows the viewport.
+24. Change browser zoom or use a high-DPI display. Pointer location should remain aligned with the rendered ink.
+25. Hide and show the document, then resume. No large burst or instability should appear after returning.
+26. Inspect the browser console. Normal operation should produce no WebGPU validation error.
 
 ## Resource and shader review
 
