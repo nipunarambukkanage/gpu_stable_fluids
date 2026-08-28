@@ -46,10 +46,19 @@
     "averageCpuEncodeMs": 0,
     "gpuSamples": 0,
     "lastGpuMs": null,
-    "averageGpuMs": 0
+    "averageGpuMs": 0,
+    "qualityGovernor": {
+      "enabled": false,
+      "profile": "balanced",
+      "pressureIterations": 20,
+      "targetGpuMs": 16.7,
+      "lastGpuMs": null
+    }
   }
 }
 ```
+
+The `runtime.qualityGovernor` object records whether adaptive quality was enabled, the active profile, the pressure iteration count, the target GPU budget, and the latest observed timestamp. This makes performance reports explainable when two runs use different pressure workloads.
 
 ## Compatibility policy
 

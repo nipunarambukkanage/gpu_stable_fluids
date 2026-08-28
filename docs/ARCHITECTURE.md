@@ -2,7 +2,7 @@
 
 The native CUDA C++ target under cuda/ is the primary high-performance execution path. The browser modules remain a portable WebGPU preview with a parallel resource graph, while the native solver owns CUDA Runtime API allocations, streams, events, shared-memory kernels, and CPU-coordinated frame export.
 
-The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/capabilities.js` owns adapter-limit and optional-feature policy; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; `src/gpu/telemetry.js` owns dependency-free local performance aggregation; `src/runtime/diagnostics.js` owns the versioned report schema; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, diagnostics export, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
+The project uses `fluid-simulation.html` as a stable browser shell and `src/main.js` as the composition root. The shell owns semantic markup and module/style references; `styles/fluid-lab.css` owns presentation; `src/config/simulation.js` owns shared workload constants; `src/gpu/capabilities.js` owns adapter-limit and optional-feature policy; `src/gpu/shaders.js` owns WGSL source strings; `src/gpu/timestamp-profiler.js` owns optional GPU timing; `src/gpu/telemetry.js` owns dependency-free local performance aggregation; `src/runtime/adaptive-quality.js` owns the hysteretic pressure governor; `src/runtime/input-recorder.js` owns bounded stroke macro data; `src/runtime/settings-store.js` owns sanitized opt-in persistence; `src/runtime/diagnostics.js` owns the versioned report schema; and `src/main.js` owns application state, WebGPU initialization, resource creation, input handling, simulation passes, rendering, recovery, diagnostics export, and startup. The `docs/`, `tests/`, and `tools/` directories hold engineering support without runtime dependencies.
 
 ## Runtime layers
 
@@ -52,7 +52,7 @@ Bind groups are built once after texture views and layouts exist. The cached com
 - Vorticity: two velocity read-index variants.
 - Confinement: two velocity read-index variants, reading the single vorticity texture and writing the opposite velocity side.
 - Tracer compute: four combinations of velocity read index and particle source index, writing the opposite particle buffer.
-- Render: two density read-index variants.
+- Render: eight cached density/velocity/pressure read-index combinations, with divergence and vorticity views shared across all combinations.
 - Tracer render: two particle read-index variants, using instanced quads.
 - Indirect arguments: one storage bind group for the device-generated four-word draw command.
 
@@ -72,7 +72,11 @@ The report shape is documented in [DIAGNOSTICS_SCHEMA.md](DIAGNOSTICS_SCHEMA.md)
 
 Shader modules are compiled in parallel, and the pipeline factory requests asynchronous compute/render pipeline creation when the implementation exposes it. Older browsers use the synchronous creation methods through the same interface, so capability compatibility does not leak into the simulation graph.
 
-The quality profile is a controlled workload governor, not a hidden adaptive loop: Performance, Balanced, and Cinematic map to 8, 20, and 36 Jacobi pressure passes. Changing the profile updates the next command graph without reallocating textures, pipelines, or bind groups. The optional HUD consumes only the aggregated telemetry snapshot and therefore has no effect on GPU ownership or synchronization.
+Performance, Balanced, and Cinematic map to 8, 20, and 36 Jacobi pressure passes. Manual changes update the next command graph without reallocating textures, pipelines, or bind groups. The optional adaptive governor consumes completed timestamp samples, requires repeated evidence, and applies a cooldown before moving between profiles. The HUD consumes only the aggregated telemetry snapshot and therefore has no effect on GPU ownership or synchronization.
+
+The presentation shader has five field modes: tonemapped density, velocity magnitude, signed pressure, signed divergence, and vorticity magnitude. The mode is carried in the existing uniform block. Brush mode is also a uniform branch in the splat kernel: paint adds ink and momentum, velocity-only adds momentum, and erase attenuates both fields under the Gaussian stroke falloff.
+
+Input macros and settings are isolated from GPU resources. `input-recorder.js` stores a bounded sequence of simulation-space samples for replay through the normal uniform path. `settings-store.js` validates UI values and writes only when the user opts into remembering the lab profile. Neither feature adds a texture readback, GPU wait, or per-frame allocation.
 
 ## Tiled stencil execution
 
