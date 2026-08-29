@@ -33,7 +33,7 @@ import { createRuntimeTelemetry, recordGpuSample, recordRuntimeFrame, recordRunt
 import { advectionShaderCode, confinementShaderCode, divergenceShaderCode, gradientShaderCode, indirectArgsShaderCode, particleComputeShaderCode, particleFragmentShaderCode, particleVertexShaderCode, pressureShaderCode, renderFragmentShaderCode, renderVertexShaderCode, splatShaderCode, vorticityShaderCode } from "./gpu/shaders.js";
 import { createDiagnosticsReport } from "./runtime/diagnostics.js";
 import { createAdaptiveQualityGovernor } from "./runtime/adaptive-quality.js";
-import { createInputRecorder, validateInputRecording } from "./runtime/input-recorder.js";
+import { createInputRecorder, serializeInputRecording, validateInputRecording } from "./runtime/input-recorder.js";
 import { clearSettings, loadSettings, saveSettings } from "./runtime/settings-store.js";
 import { SCENE_PRESETS } from "./config/presets.js";
 import { createPerformanceHud } from "./ui/performance-hud.js";
@@ -104,6 +104,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     const rememberToggle = document.getElementById("rememberToggle");
     const recordButton = document.getElementById("recordButton");
     const replayButton = document.getElementById("replayButton");
+    const saveMacroButton = document.getElementById("saveMacroButton");
     const forgetSettingsButton = document.getElementById("forgetSettingsButton");
 
     // Uniform layout: each vec4 occupies one 16-byte slot.
@@ -246,6 +247,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       snapshotButton.disabled = disabled;
       recordButton.disabled = disabled;
       replayButton.disabled = disabled || !app.replay.recording;
+      saveMacroButton.disabled = disabled || !app.replay.recording;
       diagnosticsButton.disabled = disabled;
       qualityProfileInput.disabled = disabled;
       renderModeInput.disabled = disabled;
@@ -1557,6 +1559,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         recordButton.textContent = "Record strokes";
       }
       replayButton.disabled = !app.available || !app.replay.recording || app.inputRecorder.isRecording();
+      saveMacroButton.disabled = !app.available || !app.replay.recording || app.inputRecorder.isRecording();
     }
 
     function toggleRecording() {
@@ -1694,6 +1697,22 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
         window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
         setStatus("PNG snapshot saved locally.", "good");
       }, "image/png");
+    }
+
+    function saveStrokeMacro() {
+      const serialized = serializeInputRecording(app.replay.recording);
+      if (!app.available || !serialized) {
+        setStatus("Record a stroke macro before saving it.", "warning");
+        return;
+      }
+      const blob = new Blob([serialized], { type: "application/json" });
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `stable-fluids-strokes-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      setStatus("Stroke macro saved locally.", "good");
     }
 
     function saveDiagnostics() {
@@ -1869,6 +1888,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       snapshotButton.addEventListener("click", saveSnapshot);
       recordButton.addEventListener("click", toggleRecording);
       replayButton.addEventListener("click", replayRecording);
+      saveMacroButton.addEventListener("click", saveStrokeMacro);
       diagnosticsButton.addEventListener("click", saveDiagnostics);
       forgetSettingsButton.addEventListener("click", () => {
         clearSettings(getSettingsStorage());
