@@ -60,3 +60,19 @@ export function validateInputRecording(recording) {
     ? { schemaVersion: INPUT_RECORDING_SCHEMA_VERSION, durationMs: samples.at(-1).timeMs, samples }
     : null;
 }
+
+export function serializeInputRecording(recording) {
+  const validated = validateInputRecording(recording);
+  return validated ? JSON.stringify(validated) : null;
+}
+
+export function parseInputRecording(serialized) {
+  if (typeof serialized !== "string" || serialized.length === 0) {
+    return null;
+  }
+  try {
+    return validateInputRecording(JSON.parse(serialized));
+  } catch {
+    return null;
+  }
+}
