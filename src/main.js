@@ -1543,7 +1543,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
     function updateRecordingStatus() {
       const recorder = app.inputRecorder;
       if (recorder.isRecording()) {
-        const count = recorder.snapshot().samples.length;
+        const count = recorder.sampleCount();
         recordingStatus.textContent = `Recording · ${count.toLocaleString()}`;
         recordButton.textContent = "Stop recording";
       } else if (app.replay.active) {

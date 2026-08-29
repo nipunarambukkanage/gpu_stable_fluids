@@ -29,6 +29,9 @@ export function createInputRecorder({ maxSamples = 8_192 } = {}) {
     isRecording() {
       return state.active;
     },
+    sampleCount() {
+      return state.samples.length;
+    },
     record(sample, nowMs = 0) {
       if (!state.active || state.samples.length >= state.maxSamples) {
         return false;
