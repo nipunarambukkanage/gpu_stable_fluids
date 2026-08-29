@@ -33,7 +33,7 @@ jobs:
       - name: Run native tests
         run: ctest --preset cuda-release
       - name: Export native smoke frame
-        run: .\build\cuda-release\gpu_stable_fluids_native.exe --frames 2 --output-dir build\ci-smoke
+        run: .\build\cuda-release\fluid_cuda_demo.exe --frames 2 --export-every 2 --output build\ci-smoke
       - name: Upload native diagnostics
         if: always()
         uses: actions/upload-artifact@v4

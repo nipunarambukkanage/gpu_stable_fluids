@@ -35,7 +35,7 @@ assert(quality.includes("cancel-in-progress: true"), "quality workflow must canc
 assert(codeql.includes("github/codeql-action/init@v3") && codeql.includes("github/codeql-action/analyze@v3"), "CodeQL workflow must use the supported CodeQL actions");
 assert(codeql.includes("javascript-typescript") && codeql.includes("security-events: write"), "CodeQL workflow must configure JavaScript analysis and security-event permissions");
 assert(native.includes("cmake --preset cuda-release") && native.includes("ctest --preset cuda-release"), "native workflow must configure, build, and test the CUDA preset");
-assert(native.includes("upload-artifact@v4") && native.includes("--frames 2"), "native workflow must retain a small smoke run and diagnostics artifact");
+assert(native.includes("upload-artifact@v4") && native.includes("fluid_cuda_demo.exe") && native.includes("--frames 2") && native.includes("--output build\\ci-smoke"), "native workflow must retain a valid small smoke run and diagnostics artifact");
 assert(dependabot.includes("package-ecosystem: npm") && dependabot.includes("interval: monthly"), "Dependabot must maintain the npm toolchain monthly");
 assert(pullRequest.includes("npm run check") && pullRequest.includes("Host/device transfers"), "PR template must require validation and GPU ownership review");
 assert(sourceShare.includes("nativeLines * 2 <= codeLines"), "source-share contract must enforce a strict native-code majority");
