@@ -22,6 +22,7 @@ import {
   BRUSH_MODES,
   DEFAULT_BRUSH_MODE,
   DEFAULT_RENDER_MODE,
+  RENDER_MODE_INDICES,
   RENDER_MODES,
   createInitialParticleData
 } from "./config/simulation.js";
@@ -912,7 +913,6 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
 
     // 10. Simulation passes
     const inkColorComponents = new Float32Array(3);
-    const renderModeIndices = Object.freeze({ density: 0, velocity: 1, pressure: 2, divergence: 3, vorticity: 4 });
 
     function clampNumber(value, minimum, maximum) {
       return Math.min(maximum, Math.max(minimum, value));
@@ -1001,7 +1001,7 @@ import { createPerformanceHud } from "./ui/performance-hud.js";
       uniformData[24] = simulationSettings.vorticityConfinement;
       uniformData[25] = BRUSH_MODES[simulationSettings.brushMode]?.value ?? BRUSH_MODES[DEFAULT_BRUSH_MODE].value;
       uniformData[26] = simulationSettings.renderMode === DEFAULT_RENDER_MODE ? 0 : 1;
-      uniformData[27] = renderModeIndices[simulationSettings.renderMode] ?? renderModeIndices[DEFAULT_RENDER_MODE];
+      uniformData[27] = RENDER_MODE_INDICES[simulationSettings.renderMode] ?? RENDER_MODE_INDICES[DEFAULT_RENDER_MODE];
 
       app.device.queue.writeBuffer(resources.uniformBuffer, 0, uniformData);
 

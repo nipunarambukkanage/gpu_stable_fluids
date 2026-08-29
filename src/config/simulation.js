@@ -21,6 +21,7 @@ export const RENDER_MODES = Object.freeze({
   divergence: Object.freeze({ label: "Divergence", description: "Residual compressibility diagnostic." }),
   vorticity: Object.freeze({ label: "Vorticity", description: "Curl magnitude diagnostic." })
 });
+export const RENDER_MODE_INDICES = Object.freeze({ density: 0, velocity: 1, pressure: 2, divergence: 3, vorticity: 4 });
 export const DEFAULT_RENDER_MODE = "density";
 export const BRUSH_MODES = Object.freeze({
   paint: Object.freeze({ label: "Paint + velocity", value: 0, description: "Inject ink and momentum." }),
